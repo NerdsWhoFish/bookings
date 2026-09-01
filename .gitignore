@@ -7,6 +7,8 @@
 *.tfstate.*
 *.tfplan
 web/node_modules/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
-

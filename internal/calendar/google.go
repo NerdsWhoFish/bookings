@@ -66,6 +66,33 @@ func (g *Google) Busy(ctx context.Context, connections []domain.CalendarConnecti
 	return result, nil
 }
 
+func (g *Google) Calendars(ctx context.Context, connection domain.CalendarConnection) ([]domain.CalendarInfo, error) {
+	service, err := g.service(ctx, connection)
+	if err != nil {
+		return nil, err
+	}
+	var result []domain.CalendarInfo
+	pageToken := ""
+	for {
+		call := service.CalendarList.List().ShowHidden(false).MinAccessRole("reader").Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		page, err := call.Do()
+		if err != nil {
+			return nil, fmt.Errorf("list Google calendars: %w", err)
+		}
+		for _, item := range page.Items {
+			result = append(result, domain.CalendarInfo{ID: item.Id, Name: item.Summary, Primary: item.Primary})
+		}
+		if page.NextPageToken == "" {
+			break
+		}
+		pageToken = page.NextPageToken
+	}
+	return result, nil
+}
+
 func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConnection, calendarID string, booking domain.Booking, meeting domain.MeetingType) (string, error) {
 	service, err := g.service(ctx, connection)
 	if err != nil {
@@ -80,7 +107,15 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 		End:         &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
 		Attendees:   []*calendar.EventAttendee{{Email: booking.GuestEmail, DisplayName: booking.GuestName}},
 	}
-	created, err := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx).Do()
+	insert := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx)
+	if meeting.Location == "Google Meet" {
+		event.ConferenceData = &calendar.ConferenceData{CreateRequest: &calendar.CreateConferenceRequest{
+			RequestId:             booking.ID,
+			ConferenceSolutionKey: &calendar.ConferenceSolutionKey{Type: "hangoutsMeet"},
+		}}
+		insert = insert.ConferenceDataVersion(1)
+	}
+	created, err := insert.Do()
 	if err != nil {
 		existing, getErr := service.Events.Get(calendarID, event.Id).Context(ctx).Do()
 		if getErr == nil {

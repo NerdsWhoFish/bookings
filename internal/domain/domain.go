@@ -41,6 +41,12 @@ type BusyPeriod struct {
 	End   time.Time `json:"end"`
 }
 
+type CalendarInfo struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Primary bool   `json:"primary"`
+}
+
 type Slot struct {
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
