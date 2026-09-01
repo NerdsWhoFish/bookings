@@ -41,6 +41,11 @@ variable "turnstile_site_key" {
   nullable = true
 }
 
+variable "external_blocks_enabled" {
+  type    = bool
+  default = false
+}
+
 variable "billing_account_id" {
   type     = string
   default  = null
@@ -64,4 +69,3 @@ variable "otel_exporter_otlp_endpoint" {
   default  = null
   nullable = true
 }
-

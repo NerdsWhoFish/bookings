@@ -130,6 +130,12 @@ variable "otel_exporter_otlp_endpoint" {
   nullable    = true
 }
 
+variable "external_blocks_enabled" {
+  description = "Expose the bearer-authenticated API for externally pushed busy blocks."
+  type        = bool
+  default     = false
+}
+
 variable "max_instances" {
   description = "Hard Cloud Run surge and cost cap."
   type        = number
@@ -177,4 +183,3 @@ variable "labels" {
   type        = map(string)
   default     = {}
 }
-
