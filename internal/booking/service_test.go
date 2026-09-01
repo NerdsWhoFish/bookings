@@ -52,6 +52,56 @@ func TestCreateRejectsMalformedEmail(t *testing.T) {
 	}
 }
 
+func TestAvailabilityChecksOnlyOrganizerAndSelectedAttendeeAccounts(t *testing.T) {
+	meeting := testMeeting()
+	meeting.DestinationConnectionID = "organizer"
+	meeting.AttendeeEmails = []string{"teammate@example.com"}
+	data := store.NewMemory([]domain.MeetingType{meeting})
+	for _, connection := range []domain.CalendarConnection{
+		{ID: "organizer", Email: "owner@example.com"},
+		{ID: "teammate", Email: "teammate@example.com"},
+		{ID: "unrelated", Email: "other@example.com"},
+	} {
+		if err := data.PutConnection(context.Background(), connection); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider := &capturingProvider{}
+	service := NewService(data, provider)
+	service.now = func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }
+	if _, err := service.Availability(context.Background(), meeting, service.now()); err != nil {
+		t.Fatal(err)
+	}
+	selected := make(map[string]bool, len(provider.connections))
+	for _, connection := range provider.connections {
+		selected[connection.ID] = true
+	}
+	if len(provider.connections) != 2 || !selected["organizer"] || !selected["teammate"] {
+		t.Fatalf("unexpected relevant connections: %#v", provider.connections)
+	}
+}
+
+type capturingProvider struct {
+	connections []domain.CalendarConnection
+}
+
+func (p *capturingProvider) Busy(_ context.Context, connections []domain.CalendarConnection, _, _ time.Time) ([]domain.BusyPeriod, error) {
+	p.connections = append([]domain.CalendarConnection(nil), connections...)
+	return []domain.BusyPeriod{}, nil
+}
+
+func (*capturingProvider) Calendars(context.Context, domain.CalendarConnection) ([]domain.CalendarInfo, error) {
+	return []domain.CalendarInfo{}, nil
+}
+
+func (*capturingProvider) CreateEvent(context.Context, domain.CalendarConnection, string, domain.Booking, domain.MeetingType) (string, error) {
+	return "", nil
+}
+
+func (*capturingProvider) DeleteEvent(context.Context, domain.CalendarConnection, string, string) error {
+	return nil
+}
+
 func testMeeting() domain.MeetingType {
 	return domain.MeetingType{
 		ID: "deep-dive", Slug: "deep-dive", Name: "Deep dive", DurationMinutes: 45,

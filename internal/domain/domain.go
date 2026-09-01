@@ -23,8 +23,11 @@ type MeetingType struct {
 	Location                string         `json:"location" firestore:"location"`
 	DestinationConnectionID string         `json:"destinationConnectionId,omitempty" firestore:"destination_connection_id"`
 	DestinationCalendarID   string         `json:"destinationCalendarId,omitempty" firestore:"destination_calendar_id"`
+	AttendeeEmails          []string       `json:"attendeeEmails" firestore:"attendee_emails"`
 	Availability            []WeekdayHours `json:"availability" firestore:"availability"`
 	Active                  bool           `json:"active" firestore:"active"`
+	Hidden                  bool           `json:"hidden" firestore:"hidden"`
+	Deleted                 bool           `json:"-" firestore:"deleted"`
 }
 
 type CalendarConnection struct {
@@ -34,6 +37,15 @@ type CalendarConnection struct {
 	BusyCalendarIDs []string  `json:"busyCalendarIds" firestore:"busy_calendar_ids"`
 	CreatedAt       time.Time `json:"createdAt" firestore:"created_at"`
 	UpdatedAt       time.Time `json:"updatedAt" firestore:"updated_at"`
+}
+
+type CalendarInvitation struct {
+	ID        string     `json:"id" firestore:"id"`
+	Email     string     `json:"email" firestore:"email"`
+	TokenHash []byte     `json:"-" firestore:"token_hash"`
+	ExpiresAt time.Time  `json:"expiresAt" firestore:"expires_at"`
+	UsedAt    *time.Time `json:"usedAt" firestore:"used_at"`
+	CreatedAt time.Time  `json:"createdAt" firestore:"created_at"`
 }
 
 type BusyPeriod struct {

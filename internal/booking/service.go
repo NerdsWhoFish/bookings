@@ -2,18 +2,16 @@ package booking
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/NerdsWhoFish/bookings/internal/availability"
 	calendarprovider "github.com/NerdsWhoFish/bookings/internal/calendar"
 	"github.com/NerdsWhoFish/bookings/internal/domain"
+	"github.com/NerdsWhoFish/bookings/internal/securetoken"
 	"github.com/NerdsWhoFish/bookings/internal/store"
 )
 
@@ -45,6 +43,19 @@ func (s *Service) Availability(ctx context.Context, meeting domain.MeetingType, 
 	if err != nil {
 		return nil, err
 	}
+	if meeting.DestinationConnectionID != "" {
+		attendees := make(map[string]bool, len(meeting.AttendeeEmails))
+		for _, email := range meeting.AttendeeEmails {
+			attendees[strings.ToLower(email)] = true
+		}
+		relevant := make([]domain.CalendarConnection, 0, len(connections))
+		for _, connection := range connections {
+			if connection.ID == meeting.DestinationConnectionID || attendees[strings.ToLower(connection.Email)] {
+				relevant = append(relevant, connection)
+			}
+		}
+		connections = relevant
+	}
 	busy, err := s.calendar.Busy(ctx, connections, from, from.AddDate(0, 0, 14))
 	if err != nil {
 		return nil, err
@@ -74,11 +85,11 @@ func (s *Service) Create(ctx context.Context, request Request) (Confirmation, er
 		return Confirmation{}, store.ErrConflict
 	}
 
-	id, err := randomHex(16)
+	id, err := securetoken.RandomHex(16)
 	if err != nil {
 		return Confirmation{}, err
 	}
-	cancelToken, err := randomHex(32)
+	cancelToken, err := securetoken.RandomHex(32)
 	if err != nil {
 		return Confirmation{}, err
 	}
@@ -92,7 +103,7 @@ func (s *Service) Create(ctx context.Context, request Request) (Confirmation, er
 		GuestEmail:      request.GuestEmail,
 		GuestNotes:      request.GuestNotes,
 		Status:          "pending",
-		CancelTokenHash: hash(cancelToken),
+		CancelTokenHash: securetoken.Hash(cancelToken),
 		LockIDs:         lockIDs(request.Start, end, meeting),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -127,10 +138,10 @@ func (s *Service) Cancel(ctx context.Context, id, token string) error {
 	if err != nil {
 		return err
 	}
-	if subtle.ConstantTimeCompare(booking.CancelTokenHash, hash(token)) != 1 {
+	if !securetoken.EqualHash(token, booking.CancelTokenHash) {
 		return errors.New("invalid cancellation token")
 	}
-	meeting, err := s.store.GetMeetingType(ctx, booking.MeetingTypeID)
+	meeting, err := s.store.GetMeetingTypeRecord(ctx, booking.MeetingTypeID)
 	if err != nil {
 		return err
 	}
@@ -161,17 +172,4 @@ func lockIDs(start, end time.Time, meeting domain.MeetingType) []string {
 		result = append(result, fmt.Sprintf("slot-%d", bucket.Unix()))
 	}
 	return result
-}
-
-func randomHex(bytes int) (string, error) {
-	value := make([]byte, bytes)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(value), nil
-}
-
-func hash(value string) []byte {
-	result := sha256.Sum256([]byte(value))
-	return result[:]
 }

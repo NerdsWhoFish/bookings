@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	calendarprovider "github.com/NerdsWhoFish/bookings/internal/calendar"
 	"github.com/NerdsWhoFish/bookings/internal/config"
 	"github.com/NerdsWhoFish/bookings/internal/domain"
+	"github.com/NerdsWhoFish/bookings/internal/securetoken"
 	"github.com/NerdsWhoFish/bookings/internal/store"
 	"github.com/NerdsWhoFish/bookings/internal/tokencrypto"
 	"github.com/NerdsWhoFish/bookings/internal/webui"
@@ -46,17 +49,23 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /api/public/config", server.publicConfig)
 	mux.HandleFunc("GET /api/public/meeting-types", server.meetingTypes)
+	mux.HandleFunc("GET /api/public/meeting-types/{slug}", server.meetingType)
 	mux.HandleFunc("GET /api/public/meeting-types/{slug}/availability", server.availability)
+	mux.HandleFunc("POST /api/public/calendar-invitations/start", server.calendarInvitationStart)
 	mux.HandleFunc("POST /api/public/bookings", server.createBooking)
 	mux.HandleFunc("POST /api/public/bookings/{id}/cancel", server.cancelBooking)
 	mux.HandleFunc("GET /api/admin/session", server.admin(server.adminSession))
 	mux.HandleFunc("GET /api/admin/connections", server.admin(server.connections))
+	mux.HandleFunc("GET /api/admin/calendar-invitations", server.admin(server.calendarInvitations))
+	mux.HandleFunc("POST /api/admin/calendar-invitations", server.admin(server.createCalendarInvitation))
+	mux.HandleFunc("DELETE /api/admin/calendar-invitations/{id}", server.admin(server.deleteCalendarInvitation))
 	mux.HandleFunc("GET /api/admin/meeting-types", server.admin(server.adminMeetingTypes))
 	mux.HandleFunc("GET /api/admin/connections/{id}/calendars", server.admin(server.connectionCalendars))
 	mux.HandleFunc("PUT /api/admin/connections/{id}", server.admin(server.putConnection))
 	mux.HandleFunc("GET /api/admin/google/start", server.googleStart)
 	mux.HandleFunc("GET /api/admin/google/callback", server.googleCallback)
 	mux.HandleFunc("PUT /api/admin/meeting-types/{id}", server.admin(server.putMeetingType))
+	mux.HandleFunc("DELETE /api/admin/meeting-types/{id}", server.admin(server.deleteMeetingType))
 	mux.Handle("/", webui.Handler())
 	return securityHeaders(otelhttp.NewHandler(server.requestLog(mux), "http.request"))
 }
@@ -126,7 +135,20 @@ func (s *Server) meetingTypes(response http.ResponseWriter, request *http.Reques
 		s.problem(response, request, http.StatusInternalServerError, "Could not load meeting types", err)
 		return
 	}
+	normalizeMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
+}
+
+func (s *Server) meetingType(response http.ResponseWriter, request *http.Request) {
+	meeting, err := s.store.GetMeetingType(request.Context(), request.PathValue("slug"))
+	if err != nil {
+		s.problem(response, request, statusFor(err), "Meeting type not found", err)
+		return
+	}
+	if meeting.AttendeeEmails == nil {
+		meeting.AttendeeEmails = []string{}
+	}
+	writeJSON(response, http.StatusOK, meeting)
 }
 
 func (s *Server) availability(response http.ResponseWriter, request *http.Request) {
@@ -228,12 +250,122 @@ func (s *Server) connections(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusOK, connections)
 }
 
+func (s *Server) calendarInvitations(response http.ResponseWriter, request *http.Request) {
+	invitations, err := s.store.ListCalendarInvitations(request.Context())
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not load calendar invitations", err)
+		return
+	}
+	sort.Slice(invitations, func(i, j int) bool { return invitations[i].CreatedAt.After(invitations[j].CreatedAt) })
+	writeJSON(response, http.StatusOK, invitations)
+}
+
+func (s *Server) createCalendarInvitation(response http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		s.problem(response, request, http.StatusBadRequest, "Invalid calendar invitation", err)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 254 {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Enter a valid email address", errors.New("invalid invitation email"))
+		return
+	}
+	if _, err := s.store.GetConnection(request.Context(), connectionID(email)); err == nil {
+		s.problem(response, request, http.StatusConflict, "That Google account is already connected", errors.New("connection already exists"))
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.problem(response, request, http.StatusInternalServerError, "Could not check connected accounts", err)
+		return
+	}
+	id, err := securetoken.RandomURL(16)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not create calendar invitation", err)
+		return
+	}
+	secret, err := securetoken.RandomURL(32)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not create calendar invitation", err)
+		return
+	}
+	now := time.Now().UTC()
+	invitation := domain.CalendarInvitation{
+		ID: id, Email: email, TokenHash: securetoken.Hash(secret),
+		ExpiresAt: now.Add(7 * 24 * time.Hour), CreatedAt: now,
+	}
+	if err := s.store.PutCalendarInvitation(request.Context(), invitation); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not save calendar invitation", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "calendar invitation created", "invitation_id", id)
+	writeJSON(response, http.StatusCreated, map[string]any{
+		"invitation": invitation,
+		"url":        strings.TrimRight(s.config.PublicURL, "/") + "/connect#" + id + "." + secret,
+	})
+}
+
+func (s *Server) deleteCalendarInvitation(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if err := s.store.DeleteCalendarInvitation(request.Context(), id); err != nil {
+		s.problem(response, request, statusFor(err), "Calendar invitation not found", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "calendar invitation revoked", "invitation_id", id)
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) calendarInvitationStart(response http.ResponseWriter, request *http.Request) {
+	if s.oauth == nil {
+		s.problem(response, request, http.StatusNotImplemented, "Google OAuth is disabled in development", errors.New("OAuth not configured"))
+		return
+	}
+	if !sameOrigin(request, s.config.PublicURL) {
+		s.problem(response, request, http.StatusForbidden, "Origin rejected", errors.New("cross-origin invitation request"))
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		s.problem(response, request, http.StatusBadRequest, "Invalid calendar invitation", err)
+		return
+	}
+	id, secret, ok := strings.Cut(body.Token, ".")
+	if !ok || id == "" || secret == "" {
+		s.problem(response, request, http.StatusGone, "This calendar invitation is invalid", errors.New("malformed invitation token"))
+		return
+	}
+	invitation, err := s.store.GetCalendarInvitation(request.Context(), id)
+	if err != nil {
+		s.problem(response, request, invitationStatus(err), "This calendar invitation is no longer available", err)
+		return
+	}
+	if err := validateCalendarInvitation(invitation, secret, time.Now()); err != nil {
+		s.problem(response, request, invitationStatus(err), "This calendar invitation is no longer available", err)
+		return
+	}
+	if err := s.sessions.IssueCalendarInviteBridge(response, invitation.ID); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not start Google connection", err)
+		return
+	}
+	state, err := s.sessions.NewState(response)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not start Google connection", err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"url": s.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)})
+}
+
 func (s *Server) adminMeetingTypes(response http.ResponseWriter, request *http.Request) {
 	meetings, err := s.store.ListAllMeetingTypes(request.Context())
 	if err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not load meeting types", err)
 		return
 	}
+	normalizeMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
 }
 
@@ -293,6 +425,7 @@ func (s *Server) googleStart(response http.ResponseWriter, request *http.Request
 		s.problem(response, request, http.StatusNotImplemented, "Google OAuth is disabled in development", errors.New("OAuth not configured"))
 		return
 	}
+	s.sessions.ClearCalendarInviteBridge(response)
 	state, err := s.sessions.NewState(response)
 	if err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not start sign in", err)
@@ -316,10 +449,28 @@ func (s *Server) googleCallback(response http.ResponseWriter, request *http.Requ
 		s.problem(response, request, http.StatusBadGateway, "Could not read Google account", err)
 		return
 	}
+	bridge, bridgeErr := s.sessions.ReadCalendarInviteBridge(request)
 	adminSession, sessionErr := s.sessions.Read(request)
-	if sessionErr != nil && !s.config.AdminEmails[strings.ToLower(email)] {
+	if bridgeErr != nil && sessionErr != nil && !s.config.AdminEmails[strings.ToLower(email)] {
 		s.problem(response, request, http.StatusForbidden, "This account is not an administrator", errors.New("email is not allowed"))
 		return
+	}
+	if bridgeErr == nil {
+		invitation, err := s.store.GetCalendarInvitation(request.Context(), bridge.InvitationID)
+		if err == nil && invitation.UsedAt != nil {
+			err = store.ErrAlreadyUsed
+		}
+		if err == nil && !time.Now().Before(invitation.ExpiresAt) {
+			err = store.ErrExpired
+		}
+		if err == nil && !strings.EqualFold(invitation.Email, email) {
+			err = store.ErrEmailMismatch
+		}
+		if err != nil {
+			s.sessions.ClearCalendarInviteBridge(response)
+			s.problem(response, request, invitationStatus(err), "This Google account does not match the calendar invitation", err)
+			return
+		}
 	}
 	encoded, err := json.Marshal(token)
 	if err != nil {
@@ -343,6 +494,17 @@ func (s *Server) googleCallback(response http.ResponseWriter, request *http.Requ
 	}
 	if err := s.store.PutConnection(request.Context(), connection); err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not save Google account", err)
+		return
+	}
+	if bridgeErr == nil {
+		if err := s.store.UseCalendarInvitation(request.Context(), bridge.InvitationID, email, time.Now()); err != nil {
+			s.sessions.ClearCalendarInviteBridge(response)
+			s.problem(response, request, invitationStatus(err), "Could not finish calendar invitation", err)
+			return
+		}
+		s.sessions.ClearCalendarInviteBridge(response)
+		s.logger.InfoContext(request.Context(), "calendar invitation accepted", "invitation_id", bridge.InvitationID, "connection_id", id)
+		http.Redirect(response, request, "/connect?status=connected", http.StatusFound)
 		return
 	}
 	adminEmail := email
@@ -390,12 +552,41 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 			s.problem(response, request, http.StatusUnprocessableEntity, "Destination calendar not found", errors.New("unknown destination calendar"))
 			return
 		}
+		connections, err := s.store.ListConnections(request.Context())
+		if err != nil {
+			s.problem(response, request, http.StatusInternalServerError, "Could not validate meeting attendees", err)
+			return
+		}
+		connected := make(map[string]bool, len(connections))
+		for _, item := range connections {
+			connected[strings.ToLower(item.Email)] = true
+		}
+		seen := make(map[string]bool, len(meeting.AttendeeEmails))
+		for index, email := range meeting.AttendeeEmails {
+			email = strings.ToLower(strings.TrimSpace(email))
+			if !connected[email] || seen[email] {
+				s.problem(response, request, http.StatusUnprocessableEntity, "Choose unique connected accounts as attendees", errors.New("unknown or duplicate attendee"))
+				return
+			}
+			meeting.AttendeeEmails[index] = email
+			seen[email] = true
+		}
 	}
 	if err := s.store.PutMeetingType(request.Context(), meeting); err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not save meeting type", err)
 		return
 	}
 	writeJSON(response, http.StatusOK, meeting)
+}
+
+func (s *Server) deleteMeetingType(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if err := s.store.DeleteMeetingType(request.Context(), id); err != nil {
+		s.problem(response, request, statusFor(err), "Meeting type not found", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "meeting type deleted", "meeting_type_id", id)
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) problem(response http.ResponseWriter, request *http.Request, status int, title string, err error) {
@@ -448,6 +639,18 @@ func validateMeetingType(meeting domain.MeetingType) error {
 	if len(meeting.Availability) == 0 || len(meeting.Availability) > 7 {
 		return errors.New("at least one weekly availability window is required")
 	}
+	if len(meeting.AttendeeEmails) > 50 {
+		return errors.New("meeting attendees are outside supported bounds")
+	}
+	attendees := make(map[string]bool, len(meeting.AttendeeEmails))
+	for _, email := range meeting.AttendeeEmails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		address, err := mail.ParseAddress(email)
+		if err != nil || address.Address != email || attendees[email] {
+			return errors.New("meeting attendees must be unique email addresses")
+		}
+		attendees[email] = true
+	}
 	seen := make(map[int]bool)
 	for _, hours := range meeting.Availability {
 		start, startErr := time.Parse("15:04", hours.Start)
@@ -494,6 +697,37 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	}
 	return http.StatusBadRequest
+}
+
+func invitationStatus(err error) int {
+	if errors.Is(err, store.ErrEmailMismatch) {
+		return http.StatusForbidden
+	}
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) || errors.Is(err, store.ErrAlreadyUsed) {
+		return http.StatusGone
+	}
+	return http.StatusBadRequest
+}
+
+func validateCalendarInvitation(invitation domain.CalendarInvitation, secret string, now time.Time) error {
+	if invitation.UsedAt != nil {
+		return store.ErrAlreadyUsed
+	}
+	if !now.Before(invitation.ExpiresAt) {
+		return store.ErrExpired
+	}
+	if !securetoken.EqualHash(secret, invitation.TokenHash) {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func normalizeMeetingTypes(meetings []domain.MeetingType) {
+	for index := range meetings {
+		if meetings[index].AttendeeEmails == nil {
+			meetings[index].AttendeeEmails = []string{}
+		}
+	}
 }
 
 func connectionID(email string) string {

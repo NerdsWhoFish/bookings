@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/NerdsWhoFish/bookings/internal/domain"
@@ -98,7 +99,7 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 	if err != nil {
 		return "", err
 	}
-	event := eventForBooking(booking, meeting)
+	event := eventForBooking(booking, meeting, connection.Email)
 	insert := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx)
 	if meeting.Location == "Google Meet" {
 		event.ConferenceData = &calendar.ConferenceData{CreateRequest: &calendar.CreateConferenceRequest{
@@ -118,7 +119,21 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 	return created.Id, nil
 }
 
-func eventForBooking(booking domain.Booking, meeting domain.MeetingType) *calendar.Event {
+func eventForBooking(booking domain.Booking, meeting domain.MeetingType, organizerEmail string) *calendar.Event {
+	attendees := make([]*calendar.EventAttendee, 0, len(meeting.AttendeeEmails)+1)
+	seen := map[string]bool{strings.ToLower(organizerEmail): true}
+	guestEmail := strings.ToLower(booking.GuestEmail)
+	if !seen[guestEmail] {
+		attendees = append(attendees, &calendar.EventAttendee{Email: booking.GuestEmail, DisplayName: booking.GuestName})
+		seen[guestEmail] = true
+	}
+	for _, email := range meeting.AttendeeEmails {
+		key := strings.ToLower(email)
+		if key != "" && !seen[key] {
+			attendees = append(attendees, &calendar.EventAttendee{Email: email})
+			seen[key] = true
+		}
+	}
 	return &calendar.Event{
 		Id:          deterministicEventID(booking.ID),
 		Summary:     meeting.Name + " with " + booking.GuestName,
@@ -126,7 +141,7 @@ func eventForBooking(booking domain.Booking, meeting domain.MeetingType) *calend
 		Location:    meeting.Location,
 		Start:       &calendar.EventDateTime{DateTime: booking.Start.Format(time.RFC3339), TimeZone: meeting.TimeZone},
 		End:         &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
-		Attendees:   []*calendar.EventAttendee{{Email: booking.GuestEmail, DisplayName: booking.GuestName}},
+		Attendees:   attendees,
 		Reminders:   &calendar.EventReminders{UseDefault: false, ForceSendFields: []string{"UseDefault"}},
 	}
 }
