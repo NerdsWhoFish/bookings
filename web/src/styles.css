@@ -258,9 +258,32 @@ h1 {
 
 .back:hover { color: var(--ink); }
 
-.day-strip {
+.date-navigation {
   display: grid;
-  grid-template-columns: repeat(8, minmax(64px, 1fr));
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.date-navigation span { color: var(--muted); font-size: 0.78rem; text-align: center; }
+.date-navigation button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.date-navigation button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.date-navigation button:disabled { color: var(--muted); cursor: not-allowed; opacity: 0.45; }
+
+.day-strip {
+  display: flex;
   gap: 7px;
   padding-bottom: 8px;
   overflow-x: auto;
@@ -271,7 +294,7 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 64px;
+  flex: 0 0 72px;
   padding: 13px 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -562,6 +585,9 @@ footer a:hover { color: var(--ink); }
   .meeting-duration { margin-bottom: 4px; }
   .time-grid { grid-template-columns: repeat(3, 1fr); }
   .day-strip { margin-right: -18px; }
+  .date-navigation { grid-template-columns: 1fr 1fr; }
+  .date-navigation span { grid-column: 1 / -1; grid-row: 1; }
+  .date-navigation button { justify-content: center; }
   footer { display: none; }
   .admin-shell { width: 100%; padding: 24px 18px 48px; }
   .admin-title { margin: 70px 0 38px; }

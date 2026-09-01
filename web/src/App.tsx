@@ -3,6 +3,7 @@ import { ArrowLeft, CalendarDays, Check, Clock3, Fish, MapPin, MoveRight, Radio,
 import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
 import { TracingInstrumentation } from '@grafana/faro-web-tracing'
 import { api } from './api'
+import { addDays, availabilityPageDays, formatInTimeZone, groupSlotsByDay, hasLaterAvailability, resolvedTimeZone } from './dateTime'
 import { themeByID } from './themes'
 import { ThemeProvider } from './ThemeProvider'
 import { Turnstile } from './Turnstile'
@@ -53,18 +54,24 @@ export default function App() {
     void load()
   }, [])
 
-  const chooseMeeting = async (selected: MeetingType) => {
-    setMeeting(selected)
-    setStep('time')
+  const loadAvailability = async (selected: MeetingType, from: Date) => {
     setLoading(true)
     setError('')
     try {
-      setSlots(await api.availability(selected.slug))
+      setSlots(await api.availability(selected.slug, from))
+      return true
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not load availability')
+      return false
     } finally {
       setLoading(false)
     }
+  }
+
+  const chooseMeeting = (selected: MeetingType) => {
+    setMeeting(selected)
+    setStep('time')
+    void loadAvailability(selected, new Date())
   }
 
   const restart = () => {
@@ -98,9 +105,9 @@ export default function App() {
           <Progress step={step} />
           {error && <div className="error" role="alert">{error}</div>}
           {step === 'type' && <MeetingPicker meetings={meetings} loading={loading} onChoose={chooseMeeting} />}
-          {step === 'time' && meeting && <TimePicker meeting={meeting} slots={slots} loading={loading} onBack={restart} onChoose={(selected) => { setSlot(selected); setStep('details') }} />}
-          {step === 'details' && meeting && slot && <GuestDetails config={config} meeting={meeting} slot={slot} onBack={() => setStep('time')} onComplete={(result) => { setConfirmation(result); setStep('done') }} onError={setError} />}
-          {step === 'done' && meeting && confirmation && <Success meeting={meeting} confirmation={confirmation} onRestart={restart} />}
+          {step === 'time' && meeting && <TimePicker key={meeting.id} meeting={meeting} slots={slots} loading={loading} onBack={restart} onLoadRange={(from) => loadAvailability(meeting, from)} onChoose={(selected) => { setSlot(selected); setStep('details') }} />}
+          {step === 'details' && meeting && slot && <GuestDetails config={config} meeting={meeting} slot={slot} displayTimeZone={resolvedTimeZone(meeting.timeZone)} onBack={() => setStep('time')} onComplete={(result) => { setConfirmation(result); setStep('done') }} onError={setError} />}
+          {step === 'done' && meeting && confirmation && <Success meeting={meeting} confirmation={confirmation} displayTimeZone={resolvedTimeZone(meeting.timeZone)} onRestart={restart} />}
         </section>
       </main>
       <footer><span>Built for conversations, not funnels.</span><a href="/admin">Admin</a></footer>
@@ -126,31 +133,57 @@ function MeetingPicker({ meetings, loading, onChoose }: { meetings: MeetingType[
   </div>
 }
 
-function TimePicker({ meeting, slots, loading, onBack, onChoose }: { meeting: MeetingType; slots: Slot[]; loading: boolean; onBack: () => void; onChoose: (slot: Slot) => void }) {
-  const days = useMemo(() => groupByDay(slots, meeting.timeZone), [meeting.timeZone, slots])
+function TimePicker({ meeting, slots, loading, onBack, onLoadRange, onChoose }: { meeting: MeetingType; slots: Slot[]; loading: boolean; onBack: () => void; onLoadRange: (from: Date) => Promise<boolean>; onChoose: (slot: Slot) => void }) {
+  const displayTimeZone = resolvedTimeZone(meeting.timeZone)
+  const [bookingWindowStart] = useState(() => new Date())
+  const [rangeStart, setRangeStart] = useState(bookingWindowStart)
+  const days = useMemo(() => groupSlotsByDay(slots, displayTimeZone), [displayTimeZone, slots])
   const [day, setDay] = useState('')
-  useEffect(() => { if (!day && days.length) setDay(days[0][0]) }, [day, days])
+  useEffect(() => {
+    if (days.length && !days.some(([key]) => key === day)) setDay(days[0][0])
+    if (!days.length && day) setDay('')
+  }, [day, days])
   const visible = days.find(([key]) => key === day)?.[1] ?? []
+  const canLoadEarlier = rangeStart.getTime() > bookingWindowStart.getTime()
+  const canLoadLater = hasLaterAvailability(rangeStart, bookingWindowStart, meeting.bookingWindowDays)
+  const bookingWindowEnd = addDays(bookingWindowStart, meeting.bookingWindowDays)
+  const rangeEnd = addDays(rangeStart, availabilityPageDays)
+  const displayRangeEnd = addDays(rangeEnd.getTime() < bookingWindowEnd.getTime() ? rangeEnd : bookingWindowEnd, -1)
+  const moveRange = async (offset: number) => {
+    const candidate = addDays(rangeStart, offset)
+    const next = candidate.getTime() < bookingWindowStart.getTime() ? bookingWindowStart : candidate
+    if (await onLoadRange(next)) {
+      setRangeStart(next)
+      setDay('')
+    }
+  }
   return <div className="step-content">
     <Back onClick={onBack} />
     <div className="section-heading"><span className="step-number">02</span><div><p className="kicker">{meeting.name} · {meeting.durationMinutes} min</p><h2>Pick a clear patch.</h2></div></div>
-    {loading ? <Skeleton /> : days.length === 0 ? <div className="empty"><CalendarDays /><h3>No open water yet.</h3><p>Try again later or pick another meeting type.</p></div> : <>
-      <div className="day-strip" role="tablist" aria-label="Available days">
-        {days.map(([key, values]) => <button role="tab" aria-selected={key === day} key={key} onClick={() => setDay(key)}>
-          <span>{format(values[0].start, meeting.timeZone, { weekday: 'short' })}</span>
-          <strong>{format(values[0].start, meeting.timeZone, { day: 'numeric' })}</strong>
-          <small>{format(values[0].start, meeting.timeZone, { month: 'short' })}</small>
-        </button>)}
+    {loading ? <Skeleton /> : <>
+      <div className="date-navigation">
+        <button disabled={!canLoadEarlier} onClick={() => void moveRange(-availabilityPageDays)}><ArrowLeft size={15} /> Earlier</button>
+        <span>{formatInTimeZone(rangeStart, displayTimeZone, { month: 'short', day: 'numeric' })} to {formatInTimeZone(displayRangeEnd, displayTimeZone, { month: 'short', day: 'numeric' })}</span>
+        <button disabled={!canLoadLater} onClick={() => void moveRange(availabilityPageDays)}>Later <MoveRight size={15} /></button>
       </div>
-      <div className="time-grid">
-        {visible.map((available) => <button key={available.start} onClick={() => onChoose(available)}>{format(available.start, meeting.timeZone, { hour: 'numeric', minute: '2-digit' })}</button>)}
-      </div>
-      <p className="timezone">Times shown in {meeting.timeZone.replaceAll('_', ' ')}</p>
+      {days.length === 0 ? <div className="empty"><CalendarDays /><h3>No open water in this range.</h3><p>{canLoadLater ? 'Try later dates or pick another meeting type.' : 'Try another meeting type.'}</p></div> : <>
+        <div className="day-strip" role="tablist" aria-label="Available days">
+          {days.map(([key, values]) => <button role="tab" aria-selected={key === day} key={key} onClick={() => setDay(key)}>
+            <span>{formatInTimeZone(values[0].start, displayTimeZone, { weekday: 'short' })}</span>
+            <strong>{formatInTimeZone(values[0].start, displayTimeZone, { day: 'numeric' })}</strong>
+            <small>{formatInTimeZone(values[0].start, displayTimeZone, { month: 'short' })}</small>
+          </button>)}
+        </div>
+        <div className="time-grid">
+          {visible.map((available) => <button key={available.start} onClick={() => onChoose(available)}>{formatInTimeZone(available.start, displayTimeZone, { hour: 'numeric', minute: '2-digit' })}</button>)}
+        </div>
+      </>}
+      <p className="timezone">Times shown in {displayTimeZone.replaceAll('_', ' ')}{displayTimeZone === meeting.timeZone ? '' : ` · Host availability uses ${meeting.timeZone.replaceAll('_', ' ')}`}</p>
     </>}
   </div>
 }
 
-function GuestDetails({ config, meeting, slot, onBack, onComplete, onError }: { config: PublicConfig; meeting: MeetingType; slot: Slot; onBack: () => void; onComplete: (confirmation: Confirmation) => void; onError: (message: string) => void }) {
+function GuestDetails({ config, meeting, slot, displayTimeZone, onBack, onComplete, onError }: { config: PublicConfig; meeting: MeetingType; slot: Slot; displayTimeZone: string; onBack: () => void; onComplete: (confirmation: Confirmation) => void; onError: (message: string) => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [token, setToken] = useState('')
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -176,7 +209,7 @@ function GuestDetails({ config, meeting, slot, onBack, onComplete, onError }: { 
   return <div className="step-content">
     <Back onClick={onBack} />
     <div className="section-heading"><span className="step-number">03</span><div><p className="kicker">One last thing</p><h2>Who’s joining?</h2></div></div>
-    <div className="selection-summary"><CalendarDays size={19} /><div><strong>{format(slot.start, meeting.timeZone, { weekday: 'long', month: 'long', day: 'numeric' })}</strong><span>{format(slot.start, meeting.timeZone, { hour: 'numeric', minute: '2-digit' })} · {meeting.durationMinutes} minutes · {meeting.location}</span></div></div>
+    <div className="selection-summary"><CalendarDays size={19} /><div><strong>{formatInTimeZone(slot.start, displayTimeZone, { weekday: 'long', month: 'long', day: 'numeric' })}</strong><span>{formatInTimeZone(slot.start, displayTimeZone, { hour: 'numeric', minute: '2-digit' })} · {meeting.durationMinutes} minutes · {meeting.location}</span></div></div>
     <form onSubmit={submit}>
       <label>Name<input name="name" autoComplete="name" maxLength={120} required /></label>
       <label>Email<input name="email" type="email" autoComplete="email" required /></label>
@@ -187,7 +220,7 @@ function GuestDetails({ config, meeting, slot, onBack, onComplete, onError }: { 
   </div>
 }
 
-function Success({ meeting, confirmation, onRestart }: { meeting: MeetingType; confirmation: Confirmation; onRestart: () => void }) {
+function Success({ meeting, confirmation, displayTimeZone, onRestart }: { meeting: MeetingType; confirmation: Confirmation; displayTimeZone: string; onRestart: () => void }) {
   return <div className="step-content success">
     <div className="success-mark"><Check size={32} /></div>
     <p className="kicker">You’re on the calendar</p>
@@ -195,8 +228,8 @@ function Success({ meeting, confirmation, onRestart }: { meeting: MeetingType; c
     <p>An invite is headed to <strong>{confirmation.booking.guestEmail}</strong>. There are no reminder campaigns hiding behind it.</p>
     <div className="ticket">
       <span>{meeting.name}</span>
-      <strong>{format(confirmation.booking.start, meeting.timeZone, { weekday: 'long', month: 'long', day: 'numeric' })}</strong>
-      <span><Clock3 size={16} /> {format(confirmation.booking.start, meeting.timeZone, { hour: 'numeric', minute: '2-digit' })}</span>
+      <strong>{formatInTimeZone(confirmation.booking.start, displayTimeZone, { weekday: 'long', month: 'long', day: 'numeric' })}</strong>
+      <span><Clock3 size={16} /> {formatInTimeZone(confirmation.booking.start, displayTimeZone, { hour: 'numeric', minute: '2-digit' })}</span>
       <span><MapPin size={16} /> {meeting.location}</span>
     </div>
     <button className="quiet-button" onClick={onRestart}>Book another conversation</button>
@@ -209,19 +242,6 @@ function Back({ onClick }: { onClick: () => void }) {
 
 function Skeleton() {
   return <div className="skeleton" aria-label="Loading"><span /><span /><span /></div>
-}
-
-function groupByDay(slots: Slot[], timeZone: string): [string, Slot[]][] {
-  const grouped = new Map<string, Slot[]>()
-  for (const slot of slots) {
-    const key = format(slot.start, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' })
-    grouped.set(key, [...(grouped.get(key) ?? []), slot])
-  }
-  return Array.from(grouped.entries()).slice(0, 8)
-}
-
-function format(value: string, timeZone: string, options: Intl.DateTimeFormatOptions) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, ...options }).format(new Date(value))
 }
 
 function directMeetingSlug() {
