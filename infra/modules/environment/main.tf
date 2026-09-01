@@ -256,7 +256,7 @@ resource "google_cloud_run_v2_service" "bookings" {
       }
       env {
         name  = "BOOKINGS_FARO_URL"
-        value = coalesce(var.faro_url, "")
+        value = var.faro_url == null ? "" : var.faro_url
       }
       env {
         name  = "BOOKINGS_FARO_APP_NAME"
