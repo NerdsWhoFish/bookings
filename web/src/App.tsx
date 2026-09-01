@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Clock3, Fish, MapPin, MoveRight, Radio, ShieldCheck } from 'lucide-react'
-import { initializeFaro } from '@grafana/faro-web-sdk'
+import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
 import { api } from './api'
 import { themeByID } from './themes'
 import { ThemeProvider } from './ThemeProvider'
@@ -26,7 +26,11 @@ export default function App() {
         setConfig(nextConfig)
         setMeetings(nextMeetings)
         if (nextConfig.faroURL) {
-          initializeFaro({ url: nextConfig.faroURL, app: { name: nextConfig.faroAppName, version: 'dev', environment: 'production' } })
+          initializeFaro({
+            url: nextConfig.faroURL,
+            instrumentations: getWebInstrumentations({ captureConsole: true }),
+            app: { name: nextConfig.faroAppName, version: 'dev', environment: 'production' },
+          })
         }
       })
       .catch((reason: Error) => setError(reason.message))

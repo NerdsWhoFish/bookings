@@ -24,6 +24,7 @@ import (
 	"github.com/NerdsWhoFish/bookings/internal/tokencrypto"
 	"github.com/NerdsWhoFish/bookings/internal/webui"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/oauth2"
 )
 
@@ -57,7 +58,53 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("GET /api/admin/google/callback", server.googleCallback)
 	mux.HandleFunc("PUT /api/admin/meeting-types/{id}", server.admin(server.putMeetingType))
 	mux.Handle("/", webui.Handler())
-	return securityHeaders(otelhttp.NewHandler(mux, "http.request"))
+	return securityHeaders(otelhttp.NewHandler(server.requestLog(mux), "http.request"))
+}
+
+type responseCapture struct {
+	http.ResponseWriter
+	status int
+}
+
+func (response *responseCapture) WriteHeader(status int) {
+	if response.status != 0 {
+		return
+	}
+	response.status = status
+	response.ResponseWriter.WriteHeader(status)
+}
+
+func (response *responseCapture) Write(body []byte) (int, error) {
+	if response.status == 0 {
+		response.WriteHeader(http.StatusOK)
+	}
+	return response.ResponseWriter.Write(body)
+}
+
+func (s *Server) requestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		started := time.Now()
+		captured := &responseCapture{ResponseWriter: response}
+		next.ServeHTTP(captured, request)
+		if request.Pattern == "GET /healthz" {
+			return
+		}
+		status := captured.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		attributes := []any{
+			"http.request.method", request.Method,
+			"http.route", request.Pattern,
+			"http.response.status_code", status,
+			"duration_ms", time.Since(started).Milliseconds(),
+		}
+		span := trace.SpanContextFromContext(request.Context())
+		if span.IsValid() {
+			attributes = append(attributes, "trace_id", span.TraceID().String(), "span_id", span.SpanID().String())
+		}
+		s.logger.InfoContext(request.Context(), "request completed", attributes...)
+	})
 }
 
 func (s *Server) health(response http.ResponseWriter, _ *http.Request) {
