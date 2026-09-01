@@ -30,7 +30,7 @@ func (s *Firestore) ListAllMeetingTypes(ctx context.Context) ([]domain.MeetingTy
 
 func (s *Firestore) listMeetingTypes(documents *firestore.DocumentIterator) ([]domain.MeetingType, error) {
 	defer documents.Stop()
-	var result []domain.MeetingType
+	result := make([]domain.MeetingType, 0)
 	for {
 		document, err := documents.Next()
 		if errors.Is(err, iterator.Done) {
@@ -84,7 +84,7 @@ func (s *Firestore) PutMeetingType(ctx context.Context, meeting domain.MeetingTy
 func (s *Firestore) ListConnections(ctx context.Context) ([]domain.CalendarConnection, error) {
 	documents := s.client.Collection("calendar_connections").Documents(ctx)
 	defer documents.Stop()
-	var result []domain.CalendarConnection
+	result := make([]domain.CalendarConnection, 0)
 	for {
 		document, err := documents.Next()
 		if errors.Is(err, iterator.Done) {
