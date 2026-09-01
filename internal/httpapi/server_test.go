@@ -69,3 +69,19 @@ func TestExternalBlockAPIRequiresBearerTokenAndUpsertsIdempotently(t *testing.T)
 		t.Fatalf("expected one idempotent block, got %#v, %v", blocks, err)
 	}
 }
+
+func TestSortMeetingTypesIsStableByDurationThenName(t *testing.T) {
+	meetings := []domain.MeetingType{
+		{Name: "Expedition", DurationMinutes: 75},
+		{Name: "Zebra", DurationMinutes: 20},
+		{Name: "Quick cast", DurationMinutes: 20},
+		{Name: "Deep dive", DurationMinutes: 45},
+	}
+	sortMeetingTypes(meetings)
+	want := []string{"Quick cast", "Zebra", "Deep dive", "Expedition"}
+	for index := range want {
+		if meetings[index].Name != want[index] {
+			t.Fatalf("meeting %d = %q, want %q", index, meetings[index].Name, want[index])
+		}
+	}
+}

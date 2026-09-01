@@ -139,6 +139,7 @@ func (s *Server) meetingTypes(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	normalizeMeetingTypes(meetings)
+	sortMeetingTypes(meetings)
 	sanitizePublicMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
 }
@@ -424,6 +425,7 @@ func (s *Server) adminMeetingTypes(response http.ResponseWriter, request *http.R
 		return
 	}
 	normalizeMeetingTypes(meetings)
+	sortMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
 }
 
@@ -833,6 +835,15 @@ func sanitizePublicMeetingTypes(meetings []domain.MeetingType) {
 		meetings[index].AttendeeEmails = []string{}
 		meetings[index].BlockerEmails = []string{}
 	}
+}
+
+func sortMeetingTypes(meetings []domain.MeetingType) {
+	sort.SliceStable(meetings, func(i, j int) bool {
+		if meetings[i].DurationMinutes != meetings[j].DurationMinutes {
+			return meetings[i].DurationMinutes < meetings[j].DurationMinutes
+		}
+		return strings.ToLower(meetings[i].Name) < strings.ToLower(meetings[j].Name)
+	})
 }
 
 func connectionID(email string) string {
