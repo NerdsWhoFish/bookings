@@ -10,6 +10,7 @@ locals {
   required_apis = toset([
     "artifactregistry.googleapis.com",
     "billingbudgets.googleapis.com",
+    "calendar-json.googleapis.com",
     "cloudkms.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
