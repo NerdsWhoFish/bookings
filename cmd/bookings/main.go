@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"cloud.google.com/go/firestore"
 	kms "cloud.google.com/go/kms/apiv1"
