@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+
