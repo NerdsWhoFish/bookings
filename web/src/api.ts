@@ -17,8 +17,8 @@ export const api = {
   config: () => request<PublicConfig>('/api/public/config'),
   meetingTypes: () => request<MeetingType[]>('/api/public/meeting-types'),
   meetingType: (slug: string) => request<MeetingType>(`/api/public/meeting-types/${encodeURIComponent(slug)}`),
-  availability: (slug: string) =>
-    request<Slot[]>(`/api/public/meeting-types/${encodeURIComponent(slug)}/availability?from=${encodeURIComponent(new Date().toISOString())}`),
+  availability: (slug: string, from = new Date()) =>
+    request<Slot[]>(`/api/public/meeting-types/${encodeURIComponent(slug)}/availability?from=${encodeURIComponent(from.toISOString())}`),
   book: (body: {
     meetingTypeSlug: string
     start: string

@@ -69,6 +69,9 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("GET /api/admin/google/callback", server.googleCallback)
 	mux.HandleFunc("PUT /api/admin/meeting-types/{id}", server.admin(server.putMeetingType))
 	mux.HandleFunc("DELETE /api/admin/meeting-types/{id}", server.admin(server.deleteMeetingType))
+	mux.HandleFunc("/api/", func(response http.ResponseWriter, _ *http.Request) {
+		writeJSON(response, http.StatusNotFound, map[string]string{"title": "API route not found"})
+	})
 	mux.Handle("/", webui.Handler())
 	return securityHeaders(otelhttp.NewHandler(server.requestLog(mux), "http.request"))
 }

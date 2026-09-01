@@ -85,3 +85,13 @@ func TestSortMeetingTypesIsStableByDurationThenName(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownAPIPathDoesNotServeTheWebApplication(t *testing.T) {
+	handler := New(config.Config{}, store.NewMemory(nil), nil, nil, nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodPut, "/api/not-a-route", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "API route not found") {
+		t.Fatalf("unexpected unknown API response: %d, %s", response.Code, response.Body)
+	}
+}
