@@ -98,15 +98,7 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 	if err != nil {
 		return "", err
 	}
-	event := &calendar.Event{
-		Id:          deterministicEventID(booking.ID),
-		Summary:     meeting.Name + " with " + booking.GuestName,
-		Description: booking.GuestNotes,
-		Location:    meeting.Location,
-		Start:       &calendar.EventDateTime{DateTime: booking.Start.Format(time.RFC3339), TimeZone: meeting.TimeZone},
-		End:         &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
-		Attendees:   []*calendar.EventAttendee{{Email: booking.GuestEmail, DisplayName: booking.GuestName}},
-	}
+	event := eventForBooking(booking, meeting)
 	insert := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx)
 	if meeting.Location == "Google Meet" {
 		event.ConferenceData = &calendar.ConferenceData{CreateRequest: &calendar.CreateConferenceRequest{
@@ -124,6 +116,19 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 		return "", fmt.Errorf("create Google Calendar event: %w", err)
 	}
 	return created.Id, nil
+}
+
+func eventForBooking(booking domain.Booking, meeting domain.MeetingType) *calendar.Event {
+	return &calendar.Event{
+		Id:          deterministicEventID(booking.ID),
+		Summary:     meeting.Name + " with " + booking.GuestName,
+		Description: booking.GuestNotes,
+		Location:    meeting.Location,
+		Start:       &calendar.EventDateTime{DateTime: booking.Start.Format(time.RFC3339), TimeZone: meeting.TimeZone},
+		End:         &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
+		Attendees:   []*calendar.EventAttendee{{Email: booking.GuestEmail, DisplayName: booking.GuestName}},
+		Reminders:   &calendar.EventReminders{UseDefault: false, ForceSendFields: []string{"UseDefault"}},
+	}
 }
 
 func (g *Google) DeleteEvent(ctx context.Context, connection domain.CalendarConnection, calendarID, eventID string) error {
