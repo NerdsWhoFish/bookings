@@ -2,6 +2,15 @@ package domain
 
 import "time"
 
+const DefaultSlotIntervalMinutes = 30
+
+func NormalizeSlotIntervalMinutes(minutes int) int {
+	if minutes < DefaultSlotIntervalMinutes {
+		return DefaultSlotIntervalMinutes
+	}
+	return ((minutes + DefaultSlotIntervalMinutes - 1) / DefaultSlotIntervalMinutes) * DefaultSlotIntervalMinutes
+}
+
 type WeekdayHours struct {
 	Weekday int    `json:"weekday" firestore:"weekday"`
 	Start   string `json:"start" firestore:"start"`

@@ -124,8 +124,8 @@ func seedMeetingTypes() []domain.MeetingType {
 		{Weekday: 5, Start: "09:00", End: "15:00"},
 	}
 	return []domain.MeetingType{
-		{ID: "quick-cast", Slug: "quick-cast", Name: "Quick cast", Description: "A focused check-in for one clear question.", DurationMinutes: 20, BufferAfterMinutes: 10, MinimumNoticeMinutes: 120, BookingWindowDays: 30, SlotIntervalMinutes: 10, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
-		{ID: "deep-dive", Slug: "deep-dive", Name: "Deep dive", Description: "Enough room to unpack a technical problem together.", DurationMinutes: 45, BufferBeforeMinutes: 10, BufferAfterMinutes: 15, MinimumNoticeMinutes: 240, BookingWindowDays: 45, SlotIntervalMinutes: 15, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
-		{ID: "expedition", Slug: "expedition", Name: "Expedition", Description: "A working session for architecture, planning, or review.", DurationMinutes: 75, BufferBeforeMinutes: 15, BufferAfterMinutes: 15, MinimumNoticeMinutes: 1440, BookingWindowDays: 60, SlotIntervalMinutes: 15, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
+		{ID: "quick-cast", Slug: "quick-cast", Name: "Quick cast", Description: "A focused check-in for one clear question.", DurationMinutes: 20, BufferAfterMinutes: 10, MinimumNoticeMinutes: 120, BookingWindowDays: 30, SlotIntervalMinutes: 30, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
+		{ID: "deep-dive", Slug: "deep-dive", Name: "Deep dive", Description: "Enough room to unpack a technical problem together.", DurationMinutes: 45, BufferBeforeMinutes: 10, BufferAfterMinutes: 15, MinimumNoticeMinutes: 240, BookingWindowDays: 45, SlotIntervalMinutes: 30, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
+		{ID: "expedition", Slug: "expedition", Name: "Expedition", Description: "A working session for architecture, planning, or review.", DurationMinutes: 75, BufferBeforeMinutes: 15, BufferAfterMinutes: 15, MinimumNoticeMinutes: 1440, BookingWindowDays: 60, SlotIntervalMinutes: 30, TimeZone: "America/New_York", Location: "Google Meet", Availability: availability, Active: true},
 	}
 }

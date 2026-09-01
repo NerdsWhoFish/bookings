@@ -35,3 +35,33 @@ func TestSlotsRespectsDurationBuffersAndBusyPeriods(t *testing.T) {
 		t.Fatalf("expected first slot at 09:00, got %s", got)
 	}
 }
+
+func TestSlotsNormalizesLegacyIntervalsToLocalHalfHours(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Kathmandu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meeting := domain.MeetingType{
+		DurationMinutes:     20,
+		BookingWindowDays:   2,
+		SlotIntervalMinutes: 10,
+		TimeZone:            "Asia/Kathmandu",
+		Availability:        []domain.WeekdayHours{{Weekday: int(time.Monday), Start: "09:10", End: "11:00"}},
+	}
+	now := time.Date(2026, 9, 6, 8, 0, 0, 0, location)
+	from := time.Date(2026, 9, 7, 0, 0, 0, 0, location)
+
+	slots, err := Slots(meeting, from, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"09:30", "10:00", "10:30"}
+	if len(slots) != len(want) {
+		t.Fatalf("expected %d slots, got %d: %#v", len(want), len(slots), slots)
+	}
+	for index := range want {
+		if got := slots[index].Start.In(location).Format("15:04"); got != want[index] {
+			t.Fatalf("slot %d: expected %s, got %s", index, want[index], got)
+		}
+	}
+}

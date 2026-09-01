@@ -168,7 +168,7 @@ function MeetingEditor({ meeting, connections, onSaved, onDeleted, onError }: { 
       <label>Slug<input value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} /></label>
       <label className="wide-field">Description<textarea rows={2} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       <label>Duration (minutes)<input type="number" min={5} max={480} value={draft.durationMinutes} onChange={(event) => setDraft({ ...draft, durationMinutes: Number(event.target.value) })} /></label>
-      <label>Slot interval (minutes)<input type="number" min={5} max={120} value={draft.slotIntervalMinutes} onChange={(event) => setDraft({ ...draft, slotIntervalMinutes: Number(event.target.value) })} /></label>
+      <label>Start-time spacing (minutes)<input type="number" min={30} max={120} step={30} value={draft.slotIntervalMinutes} onChange={(event) => setDraft({ ...draft, slotIntervalMinutes: Number(event.target.value) })} /><span className="field-help">Use 30 for starts at :00 and :30.</span></label>
       <label>Buffer before (minutes)<input type="number" min={0} value={draft.bufferBeforeMinutes} onChange={(event) => setDraft({ ...draft, bufferBeforeMinutes: Number(event.target.value) })} /></label>
       <label>Buffer after (minutes)<input type="number" min={0} value={draft.bufferAfterMinutes} onChange={(event) => setDraft({ ...draft, bufferAfterMinutes: Number(event.target.value) })} /></label>
       <label>Minimum notice (minutes)<input type="number" min={0} value={draft.minimumNoticeMinutes} onChange={(event) => setDraft({ ...draft, minimumNoticeMinutes: Number(event.target.value) })} /><span className="field-help">{formatMinutes(draft.minimumNoticeMinutes)}</span></label>
@@ -218,7 +218,7 @@ function newMeetingType(): MeetingType {
     bufferAfterMinutes: 10,
     minimumNoticeMinutes: 120,
     bookingWindowDays: 30,
-    slotIntervalMinutes: 15,
+    slotIntervalMinutes: 30,
     timeZone: 'America/New_York',
     location: 'Google Meet',
     destinationConnectionId: '',
