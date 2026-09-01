@@ -248,6 +248,50 @@ func (s *Firestore) UseCalendarInvitation(ctx context.Context, id, email string,
 	})
 }
 
+func (s *Firestore) ListExternalBlocks(ctx context.Context, start, end time.Time) ([]domain.ExternalBlock, error) {
+	documents := s.client.Collection("external_blocks").Where("end", ">", start).Documents(ctx)
+	defer documents.Stop()
+	result := make([]domain.ExternalBlock, 0)
+	for {
+		document, err := documents.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var block domain.ExternalBlock
+		if err := document.DataTo(&block); err != nil {
+			return nil, err
+		}
+		if block.Start.Before(end) {
+			result = append(result, block)
+		}
+	}
+	return result, nil
+}
+
+func (s *Firestore) PutExternalBlock(ctx context.Context, block domain.ExternalBlock) error {
+	ref := s.client.Collection("external_blocks").Doc(block.ID)
+	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if existing, err := tx.Get(ref); err == nil {
+			var stored domain.ExternalBlock
+			if err := existing.DataTo(&stored); err != nil {
+				return err
+			}
+			block.CreatedAt = stored.CreatedAt
+		} else if status.Code(err) != codes.NotFound {
+			return err
+		}
+		return tx.Set(ref, block)
+	})
+}
+
+func (s *Firestore) DeleteExternalBlock(ctx context.Context, id string) error {
+	_, err := s.client.Collection("external_blocks").Doc(id).Delete(ctx)
+	return err
+}
+
 func (s *Firestore) ClaimBooking(ctx context.Context, booking domain.Booking) error {
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		bookingRef := s.client.Collection("bookings").Doc(booking.ID)
@@ -278,10 +322,11 @@ func (s *Firestore) ClaimBooking(ctx context.Context, booking domain.Booking) er
 	}, firestore.MaxAttempts(32))
 }
 
-func (s *Firestore) ConfirmBooking(ctx context.Context, id, eventID string) error {
+func (s *Firestore) ConfirmBooking(ctx context.Context, id, eventID string, shadowEventIDs []string) error {
 	_, err := s.client.Collection("bookings").Doc(id).Update(ctx, []firestore.Update{
 		{Path: "status", Value: "confirmed"},
 		{Path: "event_id", Value: eventID},
+		{Path: "shadow_event_ids", Value: shadowEventIDs},
 		{Path: "updated_at", Value: time.Now().UTC()},
 	})
 	return err

@@ -62,3 +62,31 @@ func TestCalendarInvitationIsEmailBoundExpiringAndOneTime(t *testing.T) {
 		t.Fatalf("expected expired invitation rejection, got %v", err)
 	}
 }
+
+func TestExternalBlocksUpsertOverlapAndDelete(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	data := NewMemory(nil)
+	block := domain.ExternalBlock{ID: "work:event-1", Start: now.Add(time.Hour), End: now.Add(2 * time.Hour), CreatedAt: now, UpdatedAt: now}
+	if err := data.PutExternalBlock(context.Background(), block); err != nil {
+		t.Fatal(err)
+	}
+	block.End = now.Add(3 * time.Hour)
+	block.CreatedAt = now.Add(time.Minute)
+	block.UpdatedAt = now.Add(time.Minute)
+	if err := data.PutExternalBlock(context.Background(), block); err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := data.ListExternalBlocks(context.Background(), now.Add(2*time.Hour), now.Add(4*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 || !blocks[0].CreatedAt.Equal(now) || !blocks[0].End.Equal(block.End) {
+		t.Fatalf("unexpected upserted block: %#v", blocks)
+	}
+	if err := data.DeleteExternalBlock(context.Background(), block.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := data.DeleteExternalBlock(context.Background(), block.ID); err != nil {
+		t.Fatalf("delete should be idempotent: %v", err)
+	}
+}

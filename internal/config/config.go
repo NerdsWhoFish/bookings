@@ -20,6 +20,7 @@ type Config struct {
 	SessionKey         string
 	TurnstileSiteKey   string
 	TurnstileSecret    string
+	ExternalBlockToken string
 	FaroURL            string
 	FaroAppName        string
 }
@@ -39,6 +40,7 @@ func Load() (Config, error) {
 		SessionKey:         os.Getenv("BOOKINGS_SESSION_KEY"),
 		TurnstileSiteKey:   os.Getenv("BOOKINGS_TURNSTILE_SITE_KEY"),
 		TurnstileSecret:    os.Getenv("BOOKINGS_TURNSTILE_SECRET"),
+		ExternalBlockToken: os.Getenv("BOOKINGS_EXTERNAL_BLOCK_TOKEN"),
 		FaroURL:            os.Getenv("BOOKINGS_FARO_URL"),
 		FaroAppName:        value("BOOKINGS_FARO_APP_NAME", "bookings"),
 	}
@@ -61,6 +63,9 @@ func Load() (Config, error) {
 	}
 	if len(missing) > 0 {
 		return Config{}, fmt.Errorf("missing production configuration: %s", strings.Join(missing, ", "))
+	}
+	if result.ExternalBlockToken != "" && len(result.ExternalBlockToken) < 32 {
+		return Config{}, fmt.Errorf("BOOKINGS_EXTERNAL_BLOCK_TOKEN must contain at least 32 characters")
 	}
 	return result, nil
 }

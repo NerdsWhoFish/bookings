@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -54,6 +55,8 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("POST /api/public/calendar-invitations/start", server.calendarInvitationStart)
 	mux.HandleFunc("POST /api/public/bookings", server.createBooking)
 	mux.HandleFunc("POST /api/public/bookings/{id}/cancel", server.cancelBooking)
+	mux.HandleFunc("PUT /api/external/blocks/{id}", server.external(server.putExternalBlock))
+	mux.HandleFunc("DELETE /api/external/blocks/{id}", server.external(server.deleteExternalBlock))
 	mux.HandleFunc("GET /api/admin/session", server.admin(server.adminSession))
 	mux.HandleFunc("GET /api/admin/connections", server.admin(server.connections))
 	mux.HandleFunc("GET /api/admin/calendar-invitations", server.admin(server.calendarInvitations))
@@ -136,6 +139,7 @@ func (s *Server) meetingTypes(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	normalizeMeetingTypes(meetings)
+	sanitizePublicMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
 }
 
@@ -145,9 +149,8 @@ func (s *Server) meetingType(response http.ResponseWriter, request *http.Request
 		s.problem(response, request, statusFor(err), "Meeting type not found", err)
 		return
 	}
-	if meeting.AttendeeEmails == nil {
-		meeting.AttendeeEmails = []string{}
-	}
+	meeting.AttendeeEmails = []string{}
+	meeting.BlockerEmails = []string{}
 	writeJSON(response, http.StatusOK, meeting)
 }
 
@@ -230,6 +233,61 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(response, request)
 	}
+}
+
+func (s *Server) external(next http.HandlerFunc) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		if s.config.ExternalBlockToken == "" {
+			s.problem(response, request, http.StatusNotFound, "External block API is disabled", errors.New("external block token is not configured"))
+			return
+		}
+		expected := sha256.Sum256([]byte("Bearer " + s.config.ExternalBlockToken))
+		provided := sha256.Sum256([]byte(request.Header.Get("Authorization")))
+		if !hmac.Equal(expected[:], provided[:]) {
+			response.Header().Set("WWW-Authenticate", "Bearer")
+			s.problem(response, request, http.StatusUnauthorized, "Authentication required", errors.New("invalid external block token"))
+			return
+		}
+		next(response, request)
+	}
+}
+
+func (s *Server) putExternalBlock(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if !validExternalBlockID(id) {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid external block ID", errors.New("external block id is outside supported bounds"))
+		return
+	}
+	var body struct {
+		Start time.Time `json:"start"`
+		End   time.Time `json:"end"`
+	}
+	if err := decodeJSON(request, &body); err != nil || body.Start.IsZero() || !body.Start.Before(body.End) || body.End.Sub(body.Start) > 366*24*time.Hour {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Start and end must describe a valid block", errors.New("external block interval is outside supported bounds"))
+		return
+	}
+	now := time.Now().UTC()
+	block := domain.ExternalBlock{ID: id, Start: body.Start, End: body.End, CreatedAt: now, UpdatedAt: now}
+	if err := s.store.PutExternalBlock(request.Context(), block); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not save external block", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "external busy block saved")
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteExternalBlock(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if !validExternalBlockID(id) {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid external block ID", errors.New("external block id is outside supported bounds"))
+		return
+	}
+	if err := s.store.DeleteExternalBlock(request.Context(), id); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not delete external block", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "external busy block deleted")
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) adminSession(response http.ResponseWriter, request *http.Request) {
@@ -525,6 +583,15 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	meeting.ID = request.PathValue("id")
+	var err error
+	meeting.AttendeeEmails, err = normalizeEmailList(meeting.AttendeeEmails, 50)
+	if err == nil {
+		meeting.BlockerEmails, err = normalizeEmailList(meeting.BlockerEmails, 20)
+	}
+	if err != nil {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid meeting type", err)
+		return
+	}
 	if err := validateMeetingType(meeting); err != nil {
 		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid meeting type", err)
 		return
@@ -561,15 +628,19 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 		for _, item := range connections {
 			connected[strings.ToLower(item.Email)] = true
 		}
-		seen := make(map[string]bool, len(meeting.AttendeeEmails))
-		for index, email := range meeting.AttendeeEmails {
-			email = strings.ToLower(strings.TrimSpace(email))
-			if !connected[email] || seen[email] {
-				s.problem(response, request, http.StatusUnprocessableEntity, "Choose unique connected accounts as attendees", errors.New("unknown or duplicate attendee"))
+		attendees := make(map[string]bool, len(meeting.AttendeeEmails))
+		for _, email := range meeting.AttendeeEmails {
+			if !connected[email] {
+				s.problem(response, request, http.StatusUnprocessableEntity, "Choose connected accounts as attendees", errors.New("unknown attendee"))
 				return
 			}
-			meeting.AttendeeEmails[index] = email
-			seen[email] = true
+			attendees[email] = true
+		}
+		for _, email := range meeting.BlockerEmails {
+			if connected[email] || attendees[email] {
+				s.problem(response, request, http.StatusUnprocessableEntity, "Private blocker addresses must not be connected attendees", errors.New("blocker address overlaps a connected account"))
+				return
+			}
 		}
 	}
 	if err := s.store.PutMeetingType(request.Context(), meeting); err != nil {
@@ -639,17 +710,11 @@ func validateMeetingType(meeting domain.MeetingType) error {
 	if len(meeting.Availability) == 0 || len(meeting.Availability) > 7 {
 		return errors.New("at least one weekly availability window is required")
 	}
-	if len(meeting.AttendeeEmails) > 50 {
-		return errors.New("meeting attendees are outside supported bounds")
+	if _, err := normalizeEmailList(meeting.AttendeeEmails, 50); err != nil {
+		return errors.New("meeting attendees must be unique email addresses")
 	}
-	attendees := make(map[string]bool, len(meeting.AttendeeEmails))
-	for _, email := range meeting.AttendeeEmails {
-		email = strings.ToLower(strings.TrimSpace(email))
-		address, err := mail.ParseAddress(email)
-		if err != nil || address.Address != email || attendees[email] {
-			return errors.New("meeting attendees must be unique email addresses")
-		}
-		attendees[email] = true
+	if _, err := normalizeEmailList(meeting.BlockerEmails, 20); err != nil {
+		return errors.New("private blocker addresses must be unique email addresses")
 	}
 	seen := make(map[int]bool)
 	for _, hours := range meeting.Availability {
@@ -673,6 +738,36 @@ func validSlug(value string) bool {
 		}
 	}
 	return true
+}
+
+func validExternalBlockID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') && !strings.ContainsRune("._:-", character) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeEmailList(values []string, limit int) ([]string, error) {
+	if len(values) > limit {
+		return nil, errors.New("too many email addresses")
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		email := strings.ToLower(strings.TrimSpace(value))
+		address, err := mail.ParseAddress(email)
+		if err != nil || address.Address != email || seen[email] {
+			return nil, errors.New("email addresses must be valid and unique")
+		}
+		seen[email] = true
+		result = append(result, email)
+	}
+	return result, nil
 }
 
 func decodeJSON(request *http.Request, target any) error {
@@ -727,6 +822,16 @@ func normalizeMeetingTypes(meetings []domain.MeetingType) {
 		if meetings[index].AttendeeEmails == nil {
 			meetings[index].AttendeeEmails = []string{}
 		}
+		if meetings[index].BlockerEmails == nil {
+			meetings[index].BlockerEmails = []string{}
+		}
+	}
+}
+
+func sanitizePublicMeetingTypes(meetings []domain.MeetingType) {
+	for index := range meetings {
+		meetings[index].AttendeeEmails = []string{}
+		meetings[index].BlockerEmails = []string{}
 	}
 }
 

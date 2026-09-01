@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,8 +82,78 @@ func TestAvailabilityChecksOnlyOrganizerAndSelectedAttendeeAccounts(t *testing.T
 	}
 }
 
+func TestAvailabilityIncludesExternallyPushedBlocks(t *testing.T) {
+	meeting := testMeeting()
+	data := store.NewMemory([]domain.MeetingType{meeting})
+	blockedStart := time.Date(2026, 9, 2, 9, 0, 0, 0, time.FixedZone("EDT", -4*60*60))
+	if err := data.PutExternalBlock(context.Background(), domain.ExternalBlock{ID: "work:event", Start: blockedStart, End: blockedStart.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(data, calendarprovider.Mock{})
+	service.now = func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }
+	slots, err := service.Availability(context.Background(), meeting, service.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range slots {
+		if slot.Start.Equal(blockedStart) {
+			t.Fatalf("external block did not remove slot: %#v", slot)
+		}
+	}
+}
+
+func TestCreateAndCancelManageSeparatePrivateBlockEvents(t *testing.T) {
+	meeting := testMeeting()
+	meeting.BlockerEmails = []string{"work@example.com", "other-work@example.com"}
+	data := store.NewMemory([]domain.MeetingType{meeting})
+	provider := &capturingProvider{failBlockAt: -1}
+	service := NewService(data, provider)
+	service.now = func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }
+	start := time.Date(2026, 9, 2, 9, 0, 0, 0, time.FixedZone("EDT", -4*60*60))
+	confirmation, err := service.Create(context.Background(), Request{MeetingTypeSlug: meeting.Slug, Start: start, GuestName: "Ada", GuestEmail: "ada@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := data.GetBooking(context.Background(), confirmation.Booking.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.ShadowEventIDs) != 2 || len(provider.blockEmails) != 2 {
+		t.Fatalf("private block events were not recorded: %#v, %#v", stored.ShadowEventIDs, provider.blockEmails)
+	}
+	if err := service.Cancel(context.Background(), confirmation.Booking.ID, confirmation.CancelToken); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.deleted) != 3 {
+		t.Fatalf("expected guest and private events to be deleted, got %#v", provider.deleted)
+	}
+}
+
+func TestPrivateBlockFailureCompensatesGuestEventAndSlot(t *testing.T) {
+	meeting := testMeeting()
+	meeting.BlockerEmails = []string{"work@example.com"}
+	data := store.NewMemory([]domain.MeetingType{meeting})
+	provider := &capturingProvider{failBlockAt: 0}
+	service := NewService(data, provider)
+	service.now = func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }
+	request := Request{MeetingTypeSlug: meeting.Slug, Start: time.Date(2026, 9, 2, 9, 0, 0, 0, time.FixedZone("EDT", -4*60*60)), GuestName: "Ada", GuestEmail: "ada@example.com"}
+	if _, err := service.Create(context.Background(), request); err == nil {
+		t.Fatal("expected private block failure")
+	}
+	if len(provider.deleted) != 1 || provider.deleted[0] != "main" {
+		t.Fatalf("guest event was not compensated: %#v", provider.deleted)
+	}
+	provider.failBlockAt = -1
+	if _, err := service.Create(context.Background(), request); err != nil {
+		t.Fatalf("slot was not released after compensation: %v", err)
+	}
+}
+
 type capturingProvider struct {
 	connections []domain.CalendarConnection
+	blockEmails []string
+	deleted     []string
+	failBlockAt int
 }
 
 func (p *capturingProvider) Busy(_ context.Context, connections []domain.CalendarConnection, _, _ time.Time) ([]domain.BusyPeriod, error) {
@@ -95,10 +166,19 @@ func (*capturingProvider) Calendars(context.Context, domain.CalendarConnection) 
 }
 
 func (*capturingProvider) CreateEvent(context.Context, domain.CalendarConnection, string, domain.Booking, domain.MeetingType) (string, error) {
-	return "", nil
+	return "main", nil
 }
 
-func (*capturingProvider) DeleteEvent(context.Context, domain.CalendarConnection, string, string) error {
+func (p *capturingProvider) CreateBlockEvent(_ context.Context, _ domain.CalendarConnection, _ string, _ domain.Booking, _ domain.MeetingType, email string, sequence int) (string, error) {
+	if sequence == p.failBlockAt {
+		return "", errors.New("private block failed")
+	}
+	p.blockEmails = append(p.blockEmails, email)
+	return fmt.Sprintf("block-%d", sequence), nil
+}
+
+func (p *capturingProvider) DeleteEvent(_ context.Context, _ domain.CalendarConnection, _ string, eventID string) error {
+	p.deleted = append(p.deleted, eventID)
 	return nil
 }
 

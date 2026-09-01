@@ -31,8 +31,11 @@ type Store interface {
 	PutCalendarInvitation(context.Context, domain.CalendarInvitation) error
 	DeleteCalendarInvitation(context.Context, string) error
 	UseCalendarInvitation(context.Context, string, string, time.Time) error
+	ListExternalBlocks(context.Context, time.Time, time.Time) ([]domain.ExternalBlock, error)
+	PutExternalBlock(context.Context, domain.ExternalBlock) error
+	DeleteExternalBlock(context.Context, string) error
 	ClaimBooking(context.Context, domain.Booking) error
-	ConfirmBooking(context.Context, string, string) error
+	ConfirmBooking(context.Context, string, string, []string) error
 	FailBooking(context.Context, string) error
 	GetBooking(context.Context, string) (domain.Booking, error)
 	CancelBooking(context.Context, string) (domain.Booking, error)

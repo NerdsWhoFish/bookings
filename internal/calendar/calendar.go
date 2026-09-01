@@ -2,6 +2,7 @@ package calendar
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/NerdsWhoFish/bookings/internal/domain"
@@ -11,6 +12,7 @@ type Provider interface {
 	Busy(context.Context, []domain.CalendarConnection, time.Time, time.Time) ([]domain.BusyPeriod, error)
 	Calendars(context.Context, domain.CalendarConnection) ([]domain.CalendarInfo, error)
 	CreateEvent(context.Context, domain.CalendarConnection, string, domain.Booking, domain.MeetingType) (string, error)
+	CreateBlockEvent(context.Context, domain.CalendarConnection, string, domain.Booking, domain.MeetingType, string, int) (string, error)
 	DeleteEvent(context.Context, domain.CalendarConnection, string, string) error
 }
 
@@ -28,6 +30,10 @@ func (Mock) Calendars(context.Context, domain.CalendarConnection) ([]domain.Cale
 
 func (Mock) CreateEvent(_ context.Context, _ domain.CalendarConnection, _ string, booking domain.Booking, _ domain.MeetingType) (string, error) {
 	return "dev-" + booking.ID, nil
+}
+
+func (Mock) CreateBlockEvent(_ context.Context, _ domain.CalendarConnection, _ string, booking domain.Booking, _ domain.MeetingType, _ string, sequence int) (string, error) {
+	return fmt.Sprintf("dev-%s-block-%d", booking.ID, sequence), nil
 }
 
 func (Mock) DeleteEvent(context.Context, domain.CalendarConnection, string, string) error {
