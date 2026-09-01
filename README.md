@@ -144,7 +144,7 @@ To add someone else's calendar, enter their Google account email under Connectio
 Each meeting type owns:
 
 - Slug, name, and description
-- Duration and slot interval
+- Duration and start-time spacing
 - Buffer before and after
 - Minimum notice and booking-window limits
 - IANA time zone and weekly availability
@@ -155,6 +155,8 @@ Each meeting type owns:
 - Active, hidden, and deleted states
 
 Hidden meeting types stay off the main booking page but remain available at `/meet/<slug>`. Deleting a meeting type removes it from the administrator and public pages. A storage tombstone keeps existing bookings cancellable without exposing the deleted type.
+
+Start-time spacing uses 30-minute multiples anchored to the meeting type's local `:00` and `:30` marks. Duration is independent, so a 20-minute meeting can start at 9:30. Existing intervals below 30 minutes normalize to 30.
 
 Private blocker addresses are for calendars that can receive an invitation but must stay separate from the guest. Each address receives its own event named `Busy`. That event has no guest identity, notes, meeting link, or other attendees. If any required blocker event fails, the booking is rolled back and the guest event is canceled.
 
@@ -182,7 +184,7 @@ curl --fail-with-body \
 
 Both operations are idempotent. IDs may contain letters, numbers, `.`, `_`, `:`, and `-`, up to 128 characters. Use a value derived from the source event ID, not its title, organizer, or attendee addresses. Intervals use RFC 3339 timestamps and half-open `[start, end)` semantics.
 
-Availability is computed in the meeting type's time zone and returned to the guest as absolute timestamps. The browser displays those timestamps in that same zone so daylight-saving transitions stay on the server's time-zone rules.
+Availability is computed in the meeting type's time zone and returned as absolute timestamps. The browser groups and displays those moments in the visitor's time zone, then submits the original timestamp unchanged so the host and guest calendars receive the same instant.
 
 ## Themes
 
