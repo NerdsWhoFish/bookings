@@ -10,13 +10,15 @@ The first bundled theme is Nerds Who Fish. The software is MIT licensed.
 
 - Several meeting types with independent lengths, buffers, notice periods, booking windows, schedules, locations, and destination calendars
 - Several Google accounts, with a selectable set of busy calendars on each account
+- One-time links for inviting someone else to connect their Google account without giving them administrator access
+- Per-meeting attendee selection from connected Google accounts
 - Live Google free/busy checks before showing a time and again before booking it
 - Transactional five-minute Firestore lock buckets to stop two guests claiming the same time
 - Deterministic Google event IDs, Google Meet creation, and immediate guest invitations
 - Guest cancellation without an account
 - Google OAuth administrator access with an explicit email allowlist
 - Cloudflare Turnstile on the public booking form
-- OpenTelemetry traces on the server and optional Grafana Faro browser telemetry
+- OpenTelemetry logs and traces on the server, plus optional Grafana Faro browser telemetry
 - A compiled theme contract with no arbitrary CSS, HTML, or script injection
 - No reminders
 
@@ -35,7 +37,7 @@ Google Calendar and Firestore cannot share a transaction. The booking path handl
 
 The deterministic event ID makes a retry safe when Google accepts a request but the network drops the response.
 
-The full tradeoffs are in [ADR 0001](adr/0001-keep-booking-execution-request-driven.md) and [ADR 0002](adr/0002-compile-themes-as-validated-packages.md).
+The full tradeoffs are in [ADR 0001](adr/0001-keep-booking-execution-request-driven.md), [ADR 0002](adr/0002-compile-themes-as-validated-packages.md), and [ADR 0003](adr/0003-use-fragment-carried-invitations-for-delegated-calendar-conn.md).
 
 ## Run it locally
 
@@ -129,7 +131,9 @@ https://book.example.com/api/admin/google/callback
 
 The app requests email identity, calendar free/busy, event, and calendar-list scopes. A Google Workspace app restricted to one organization can usually remain internal. A public external app may need Google OAuth verification before arbitrary Google accounts can connect. That is provider policy, not something self-hosting avoids.
 
-The first allowed administrator signs in at `/admin`, connects one or more Google accounts, selects the calendars that count as busy, and assigns a destination account and calendar to each meeting type.
+The first allowed administrator signs in at `/admin`, connects a Google account, selects the calendars that count as busy, and assigns a destination account and calendar to each meeting type.
+
+To add someone else's calendar, enter their Google account email under Connection links and send them the generated link. The link works once and expires after seven days. After they consent through Google, their account appears under Busy calendars and can be selected as an attendee on individual meeting types. Connecting through an invitation does not create an administrator session.
 
 ## Meeting types
 
@@ -142,7 +146,10 @@ Each meeting type owns:
 - IANA time zone and weekly availability
 - Location, including Google Meet
 - Destination Google account and calendar
-- Active state
+- Connected accounts to invite automatically
+- Active, hidden, and deleted states
+
+Hidden meeting types stay off the main booking page but remain available at `/meet/<slug>`. Deleting a meeting type removes it from the administrator and public pages. A storage tombstone keeps existing bookings cancellable without exposing the deleted type.
 
 Availability is computed in the meeting type's time zone and returned to the guest as absolute timestamps. The browser displays those timestamps in that same zone so daylight-saving transitions stay on the server's time-zone rules.
 
@@ -171,6 +178,7 @@ The module defaults to a $5 monthly budget when a billing account ID is provided
 - Browser telemetry receives only the public Faro collector URL and app name. General OTLP credentials stay server-side.
 - Administrator mutations require a signed, HTTP-only, same-site cookie and a same-origin request.
 - Booking cancellation tokens are random, stored only as SHA-256 hashes, and never logged.
+- Calendar connection links are email-bound, expire after seven days, and work once. Only a SHA-256 hash of the secret is stored. The secret stays in the URL fragment so it does not reach Cloud Run access logs or referrer headers.
 - Turnstile is mandatory outside development mode.
 - The content security policy allows only the application, Turnstile, and configured Grafana collector families.
 
