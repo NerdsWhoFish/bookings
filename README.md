@@ -12,6 +12,8 @@ The first bundled theme is Nerds Who Fish. The software is MIT licensed.
 - Several Google accounts, with a selectable set of busy calendars on each account
 - One-time links for inviting someone else to connect their Google account without giving them administrator access
 - Per-meeting attendee selection from connected Google accounts
+- Separate private "Busy" invites for work addresses that must never appear on the guest event
+- An authenticated push API for busy times from calendars the service cannot read
 - Live Google free/busy checks before showing a time and again before booking it
 - Transactional five-minute Firestore lock buckets to stop two guests claiming the same time
 - Deterministic Google event IDs, Google Meet creation, and immediate guest invitations
@@ -37,7 +39,7 @@ Google Calendar and Firestore cannot share a transaction. The booking path handl
 
 The deterministic event ID makes a retry safe when Google accepts a request but the network drops the response.
 
-The full tradeoffs are in [ADR 0001](adr/0001-keep-booking-execution-request-driven.md), [ADR 0002](adr/0002-compile-themes-as-validated-packages.md), and [ADR 0003](adr/0003-use-fragment-carried-invitations-for-delegated-calendar-conn.md).
+The full tradeoffs are in [ADR 0001](adr/0001-keep-booking-execution-request-driven.md), [ADR 0002](adr/0002-compile-themes-as-validated-packages.md), [ADR 0003](adr/0003-use-fragment-carried-invitations-for-delegated-calendar-conn.md), and [ADR 0004](adr/0004-keep-private-work-calendar-blocks-separate-from-guest-events.md).
 
 ## Run it locally
 
@@ -83,6 +85,7 @@ module "bookings" {
 
   faro_url                    = "https://faro-collector.example.com/collect"
   otel_exporter_otlp_endpoint = "https://otlp-gateway.example.com/otlp"
+  external_blocks_enabled     = true
 }
 ```
 
@@ -105,6 +108,7 @@ Add these secret versions outside OpenTofu so their payloads never enter state:
 - `session_key`: at least 32 random bytes
 - `turnstile_secret`: Cloudflare Turnstile secret key
 - `otel_exporter_headers`: OTLP authentication headers, only when an OTLP endpoint is configured
+- `external_block_api_token`: at least 32 random characters, only when `external_blocks_enabled` is true
 
 The module returns their exact Secret Manager IDs in `secret_ids`.
 
@@ -147,9 +151,36 @@ Each meeting type owns:
 - Location, including Google Meet
 - Destination Google account and calendar
 - Connected accounts to invite automatically
+- Private blocker addresses that each receive a separate sanitized event
 - Active, hidden, and deleted states
 
 Hidden meeting types stay off the main booking page but remain available at `/meet/<slug>`. Deleting a meeting type removes it from the administrator and public pages. A storage tombstone keeps existing bookings cancellable without exposing the deleted type.
+
+Private blocker addresses are for calendars that can receive an invitation but must stay separate from the guest. Each address receives its own event named `Busy`. That event has no guest identity, notes, meeting link, or other attendees. If any required blocker event fails, the booking is rolled back and the guest event is canceled.
+
+## External busy blocks
+
+Enable `external_blocks_enabled`, populate the `external_block_api_token` secret, and let a trusted bridge push intervals that should be unavailable. The API stores no event title or attendee data.
+
+Create or update a block with a stable opaque ID:
+
+```console
+curl --fail-with-body \
+  -X PUT "https://book.example.com/api/external/blocks/work:event-123" \
+  -H "Authorization: Bearer $BOOKINGS_EXTERNAL_BLOCK_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"start":"2026-09-02T13:00:00Z","end":"2026-09-02T14:00:00Z"}'
+```
+
+Delete it when the source event disappears:
+
+```console
+curl --fail-with-body \
+  -X DELETE "https://book.example.com/api/external/blocks/work:event-123" \
+  -H "Authorization: Bearer $BOOKINGS_EXTERNAL_BLOCK_TOKEN"
+```
+
+Both operations are idempotent. IDs may contain letters, numbers, `.`, `_`, `:`, and `-`, up to 128 characters. Use a value derived from the source event ID, not its title, organizer, or attendee addresses. Intervals use RFC 3339 timestamps and half-open `[start, end)` semantics.
 
 Availability is computed in the meeting type's time zone and returned to the guest as absolute timestamps. The browser displays those timestamps in that same zone so daylight-saving transitions stay on the server's time-zone rules.
 
@@ -179,6 +210,7 @@ The module defaults to a $5 monthly budget when a billing account ID is provided
 - Administrator mutations require a signed, HTTP-only, same-site cookie and a same-origin request.
 - Booking cancellation tokens are random, stored only as SHA-256 hashes, and never logged.
 - Calendar connection links are email-bound, expire after seven days, and work once. Only a SHA-256 hash of the secret is stored. The secret stays in the URL fragment so it does not reach Cloud Run access logs or referrer headers.
+- External blocks require a separate bearer token from Secret Manager. Their IDs and payloads should contain no calendar content beyond start and end timestamps.
 - Turnstile is mandatory outside development mode.
 - The content security policy allows only the application, Turnstile, and configured Grafana collector families.
 
