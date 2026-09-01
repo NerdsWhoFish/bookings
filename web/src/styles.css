@@ -65,6 +65,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   transform-origin: bottom;
 }
 
+.brand-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .wordmark {
   display: inline-flex;
   align-items: center;
@@ -78,6 +85,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 
 .wordmark svg, .wordmark-fish { color: var(--primary); }
+
+.mobile-admin-link { display: none; }
 
 .brand-copy {
   position: relative;
@@ -577,6 +586,21 @@ footer a:hover { color: var(--ink); }
   .brand-copy { margin: 46px 0 10px; }
   .eyebrow { margin-bottom: 10px; font-size: 0.66rem; }
   h1 { max-width: 390px; margin-bottom: 0; font-size: clamp(2.8rem, 14vw, 4rem); }
+  .mobile-admin-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 0 13px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .mobile-admin-link:hover { border-color: var(--primary); color: var(--primary); }
   .booking-panel { min-height: 630px; padding: 24px 18px 40px; }
   .progress { margin-bottom: 38px; }
   .section-heading { gap: 10px; margin-bottom: 24px; }
