@@ -14,6 +14,7 @@ var (
 
 type Store interface {
 	ListMeetingTypes(context.Context) ([]domain.MeetingType, error)
+	ListAllMeetingTypes(context.Context) ([]domain.MeetingType, error)
 	GetMeetingType(context.Context, string) (domain.MeetingType, error)
 	PutMeetingType(context.Context, domain.MeetingType) error
 	ListConnections(context.Context) ([]domain.CalendarConnection, error)

@@ -27,6 +27,7 @@ export const api = {
     turnstileToken: string
   }) => request<Confirmation>('/api/public/bookings', { method: 'POST', body: JSON.stringify(body) }),
   adminSession: () => request<Session>('/api/admin/session'),
+  adminMeetingTypes: () => request<MeetingType[]>('/api/admin/meeting-types'),
   connections: () => request<CalendarConnection[]>('/api/admin/connections'),
   calendars: (connectionID: string) => request<CalendarInfo[]>(`/api/admin/connections/${encodeURIComponent(connectionID)}/calendars`),
   saveConnection: (connectionID: string, busyCalendarIds: string[]) => request<CalendarConnection>(`/api/admin/connections/${encodeURIComponent(connectionID)}`, { method: 'PUT', body: JSON.stringify({ busyCalendarIds }) }),

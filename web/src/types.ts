@@ -13,6 +13,7 @@ export type MeetingType = {
   location: string
   destinationConnectionId: string
   destinationCalendarId: string
+  availability: { weekday: number; start: string; end: string }[]
   active: boolean
 }
 

@@ -50,6 +50,7 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("POST /api/public/bookings/{id}/cancel", server.cancelBooking)
 	mux.HandleFunc("GET /api/admin/session", server.admin(server.adminSession))
 	mux.HandleFunc("GET /api/admin/connections", server.admin(server.connections))
+	mux.HandleFunc("GET /api/admin/meeting-types", server.admin(server.adminMeetingTypes))
 	mux.HandleFunc("GET /api/admin/connections/{id}/calendars", server.admin(server.connectionCalendars))
 	mux.HandleFunc("PUT /api/admin/connections/{id}", server.admin(server.putConnection))
 	mux.HandleFunc("GET /api/admin/google/start", server.googleStart)
@@ -178,6 +179,15 @@ func (s *Server) connections(response http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(response, http.StatusOK, connections)
+}
+
+func (s *Server) adminMeetingTypes(response http.ResponseWriter, request *http.Request) {
+	meetings, err := s.store.ListAllMeetingTypes(request.Context())
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not load meeting types", err)
+		return
+	}
+	writeJSON(response, http.StatusOK, meetings)
 }
 
 func (s *Server) connectionCalendars(response http.ResponseWriter, request *http.Request) {
@@ -310,6 +320,30 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid meeting type", err)
 		return
 	}
+	if !s.config.DevMode {
+		if meeting.DestinationConnectionID == "" || meeting.DestinationCalendarID == "" {
+			s.problem(response, request, http.StatusUnprocessableEntity, "Choose a destination calendar", errors.New("destination connection and calendar are required"))
+			return
+		}
+		connection, err := s.store.GetConnection(request.Context(), meeting.DestinationConnectionID)
+		if err != nil {
+			s.problem(response, request, http.StatusUnprocessableEntity, "Destination account not found", err)
+			return
+		}
+		calendars, err := s.calendar.Calendars(request.Context(), connection)
+		if err != nil {
+			s.problem(response, request, http.StatusBadGateway, "Could not validate destination calendar", err)
+			return
+		}
+		known := false
+		for _, calendar := range calendars {
+			known = known || calendar.ID == meeting.DestinationCalendarID
+		}
+		if !known {
+			s.problem(response, request, http.StatusUnprocessableEntity, "Destination calendar not found", errors.New("unknown destination calendar"))
+			return
+		}
+	}
 	if err := s.store.PutMeetingType(request.Context(), meeting); err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not save meeting type", err)
 		return
@@ -358,7 +392,37 @@ func validateMeetingType(meeting domain.MeetingType) error {
 	if _, err := time.LoadLocation(meeting.TimeZone); err != nil {
 		return errors.New("unknown time zone")
 	}
+	if len(meeting.Name) > 120 || len(meeting.Description) > 500 || !validSlug(meeting.Slug) {
+		return errors.New("name, description, or slug is outside supported bounds")
+	}
+	if meeting.BufferBeforeMinutes < 0 || meeting.BufferAfterMinutes < 0 || meeting.MinimumNoticeMinutes < 0 || meeting.SlotIntervalMinutes > 120 {
+		return errors.New("buffers, notice, and slot interval are outside supported bounds")
+	}
+	if len(meeting.Availability) == 0 || len(meeting.Availability) > 7 {
+		return errors.New("at least one weekly availability window is required")
+	}
+	seen := make(map[int]bool)
+	for _, hours := range meeting.Availability {
+		start, startErr := time.Parse("15:04", hours.Start)
+		end, endErr := time.Parse("15:04", hours.End)
+		if hours.Weekday < 0 || hours.Weekday > 6 || seen[hours.Weekday] || startErr != nil || endErr != nil || !start.Before(end) {
+			return errors.New("weekly availability must have one valid start and end per weekday")
+		}
+		seen[hours.Weekday] = true
+	}
 	return nil
+}
+
+func validSlug(value string) bool {
+	if len(value) > 80 || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeJSON(request *http.Request, target any) error {

@@ -12,7 +12,7 @@ export default function Admin() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.adminSession(), api.connections(), api.meetingTypes()])
+    Promise.all([api.adminSession(), api.connections(), api.adminMeetingTypes()])
       .then(([nextSession, nextConnections, nextMeetings]) => {
         setSession(nextSession)
         setConnections(nextConnections)
@@ -35,8 +35,8 @@ export default function Admin() {
           {connections.length === 0 ? <div className="admin-empty"><CalendarCheck /><strong>No Google accounts yet</strong><span>Add one before publishing meeting types.</span></div> : connections.map((connection) => <ConnectionEditor key={connection.id} connection={connection} onSaved={(next) => setConnections((values) => values.map((value) => value.id === next.id ? next : value))} onError={setError} />)}
         </section>
         <section className="admin-section">
-          <div className="admin-section-heading"><div><p className="kicker">Meeting catalog</p><h2>Types and lengths</h2></div></div>
-          <div className="admin-meetings">{meetings.map((meeting) => <MeetingEditor key={meeting.id} meeting={meeting} connections={connections} onSaved={(next) => setMeetings((values) => values.map((value) => value.id === next.id ? next : value))} onError={setError} />)}</div>
+          <div className="admin-section-heading"><div><p className="kicker">Meeting catalog</p><h2>Types and lengths</h2></div><button className="icon-button" onClick={() => setMeetings((values) => [...values, newMeetingType()])}><Plus size={17} /> New type</button></div>
+          <div className="admin-meetings">{meetings.length === 0 && <div className="admin-empty"><strong>No meeting types yet</strong><span>Create one to open the booking page.</span></div>}{meetings.map((meeting) => <MeetingEditor key={meeting.id} meeting={meeting} connections={connections} onSaved={(next) => setMeetings((values) => values.some((value) => value.id === next.id) ? values.map((value) => value.id === next.id ? next : value) : [...values, next])} onError={setError} />)}</div>
         </section>
       </div>}
     </main>
@@ -66,7 +66,15 @@ function ConnectionEditor({ connection, onSaved, onError }: { connection: Calend
 
 function MeetingEditor({ meeting, connections, onSaved, onError }: { meeting: MeetingType; connections: CalendarConnection[]; onSaved: (value: MeetingType) => void; onError: (message: string) => void }) {
   const [draft, setDraft] = useState(meeting)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(meeting.name === 'New meeting type')
+  const [calendars, setCalendars] = useState<CalendarInfo[]>([])
+  useEffect(() => {
+    if (!draft.destinationConnectionId) {
+      setCalendars([])
+      return
+    }
+    api.calendars(draft.destinationConnectionId).then(setCalendars).catch((reason: Error) => onError(reason.message))
+  }, [draft.destinationConnectionId, onError])
   const save = async () => {
     try {
       const saved = await api.saveMeetingType(draft)
@@ -82,14 +90,58 @@ function MeetingEditor({ meeting, connections, onSaved, onError }: { meeting: Me
     </button>
     {open && <div className="meeting-fields">
       <label>Name<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+      <label>Slug<input value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} /></label>
+      <label className="wide-field">Description<textarea rows={2} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       <label>Duration<input type="number" min={5} max={480} value={draft.durationMinutes} onChange={(event) => setDraft({ ...draft, durationMinutes: Number(event.target.value) })} /></label>
+      <label>Slot interval<input type="number" min={5} max={120} value={draft.slotIntervalMinutes} onChange={(event) => setDraft({ ...draft, slotIntervalMinutes: Number(event.target.value) })} /></label>
       <label>Buffer before<input type="number" min={0} value={draft.bufferBeforeMinutes} onChange={(event) => setDraft({ ...draft, bufferBeforeMinutes: Number(event.target.value) })} /></label>
       <label>Buffer after<input type="number" min={0} value={draft.bufferAfterMinutes} onChange={(event) => setDraft({ ...draft, bufferAfterMinutes: Number(event.target.value) })} /></label>
       <label>Minimum notice<input type="number" min={0} value={draft.minimumNoticeMinutes} onChange={(event) => setDraft({ ...draft, minimumNoticeMinutes: Number(event.target.value) })} /></label>
       <label>Booking window<input type="number" min={1} max={365} value={draft.bookingWindowDays} onChange={(event) => setDraft({ ...draft, bookingWindowDays: Number(event.target.value) })} /></label>
-      <label className="wide-field">Destination account<select value={draft.destinationConnectionId ?? ''} onChange={(event) => setDraft({ ...draft, destinationConnectionId: event.target.value })}><option value="">Development mock</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.email}</option>)}</select></label>
+      <label>Time zone<input value={draft.timeZone} onChange={(event) => setDraft({ ...draft, timeZone: event.target.value })} /></label>
+      <label>Location<input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} /></label>
+      <label>Destination account<select value={draft.destinationConnectionId ?? ''} onChange={(event) => setDraft({ ...draft, destinationConnectionId: event.target.value, destinationCalendarId: '' })}><option value="">Development mock</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.email}</option>)}</select></label>
+      <label>Destination calendar<select value={draft.destinationCalendarId ?? ''} disabled={!draft.destinationConnectionId} onChange={(event) => setDraft({ ...draft, destinationCalendarId: event.target.value })}><option value="">Choose a calendar</option>{calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.primary ? ' · primary' : ''}</option>)}</select></label>
+      <ScheduleEditor availability={draft.availability} onChange={(availability) => setDraft({ ...draft, availability })} />
+      <label className="active-toggle"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />Available to book</label>
       <button className="small-button wide-field" onClick={save}><Save size={16} /> Save meeting type</button>
     </div>}
   </article>
 }
 
+function ScheduleEditor({ availability, onChange }: { availability: MeetingType['availability']; onChange: (value: MeetingType['availability']) => void }) {
+  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const update = (weekday: number, field: 'enabled' | 'start' | 'end', value: string | boolean) => {
+    if (field === 'enabled') {
+      onChange(value ? [...availability, { weekday, start: '09:00', end: '17:00' }].sort((a, b) => a.weekday - b.weekday) : availability.filter((hours) => hours.weekday !== weekday))
+      return
+    }
+    onChange(availability.map((hours) => hours.weekday === weekday ? { ...hours, [field]: value } : hours))
+  }
+  return <fieldset className="schedule-editor wide-field"><legend>Weekly availability</legend>{weekdays.map((name, weekday) => {
+    const hours = availability.find((value) => value.weekday === weekday)
+    return <div key={name}><label><input type="checkbox" checked={!!hours} onChange={(event) => update(weekday, 'enabled', event.target.checked)} />{name}</label><input aria-label={`${name} start`} type="time" disabled={!hours} value={hours?.start ?? '09:00'} onChange={(event) => update(weekday, 'start', event.target.value)} /><span>to</span><input aria-label={`${name} end`} type="time" disabled={!hours} value={hours?.end ?? '17:00'} onChange={(event) => update(weekday, 'end', event.target.value)} /></div>
+  })}</fieldset>
+}
+
+function newMeetingType(): MeetingType {
+  const id = crypto.randomUUID()
+  return {
+    id,
+    slug: `meeting-${id.slice(0, 8)}`,
+    name: 'New meeting type',
+    description: '',
+    durationMinutes: 30,
+    bufferBeforeMinutes: 0,
+    bufferAfterMinutes: 10,
+    minimumNoticeMinutes: 120,
+    bookingWindowDays: 30,
+    slotIntervalMinutes: 15,
+    timeZone: 'America/New_York',
+    location: 'Google Meet',
+    destinationConnectionId: '',
+    destinationCalendarId: '',
+    availability: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, start: '09:00', end: '17:00' })),
+    active: true,
+  }
+}

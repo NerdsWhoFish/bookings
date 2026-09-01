@@ -451,6 +451,19 @@ footer a:hover { color: var(--ink); }
   cursor: pointer;
 }
 
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-button:hover { color: var(--primary); }
+
 .small-button:hover { background: var(--primary); color: var(--primary-ink); }
 .small-button:disabled { opacity: 0.45; }
 
@@ -461,8 +474,18 @@ footer a:hover { color: var(--ink); }
 .meeting-editor-summary small { max-width: 440px; color: var(--muted); font-weight: 400; }
 .meeting-editor-summary b { flex: 0 0 auto; color: var(--primary); font-size: 0.78rem; }
 .meeting-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; padding: 0 18px 18px; }
-.meeting-fields input, .meeting-fields select { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); }
+.meeting-fields input, .meeting-fields select, .meeting-fields textarea { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); }
 .wide-field { grid-column: 1 / -1; }
+
+.active-toggle { display: flex; grid-column: 1 / -1; grid-template-columns: auto 1fr; align-items: center; gap: 9px; color: var(--ink); }
+.active-toggle input { width: 18px; height: 18px; accent-color: var(--primary); }
+
+.schedule-editor { display: grid; gap: 8px; margin: 4px 0; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
+.schedule-editor legend { padding: 0 7px; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.schedule-editor > div { display: grid; grid-template-columns: minmax(110px, 1fr) 110px auto 110px; align-items: center; gap: 8px; }
+.schedule-editor > div label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; color: var(--ink); }
+.schedule-editor > div label input { width: 16px; height: 16px; accent-color: var(--primary); }
+.schedule-editor > div span { color: var(--muted); font-size: 0.78rem; }
 
 @keyframes pulse { to { opacity: 0.85; } }
 
@@ -504,6 +527,13 @@ footer a:hover { color: var(--ink); }
   .admin-section-heading { align-items: flex-start; flex-direction: column; }
   .meeting-fields { grid-template-columns: 1fr; }
   .wide-field { grid-column: auto; }
+  .schedule-editor > div { grid-template-columns: minmax(96px, 1fr) 88px auto 88px; }
+}
+
+@media (max-width: 420px) {
+  .schedule-editor > div { grid-template-columns: 1fr 1fr; }
+  .schedule-editor > div label { grid-column: 1 / -1; }
+  .schedule-editor > div span { display: none; }
 }
 
 @media (max-width: 350px) {

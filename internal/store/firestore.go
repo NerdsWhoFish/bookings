@@ -21,7 +21,14 @@ func NewFirestore(client *firestore.Client) *Firestore {
 }
 
 func (s *Firestore) ListMeetingTypes(ctx context.Context) ([]domain.MeetingType, error) {
-	documents := s.client.Collection("meeting_types").Where("active", "==", true).Documents(ctx)
+	return s.listMeetingTypes(s.client.Collection("meeting_types").Where("active", "==", true).Documents(ctx))
+}
+
+func (s *Firestore) ListAllMeetingTypes(ctx context.Context) ([]domain.MeetingType, error) {
+	return s.listMeetingTypes(s.client.Collection("meeting_types").Documents(ctx))
+}
+
+func (s *Firestore) listMeetingTypes(documents *firestore.DocumentIterator) ([]domain.MeetingType, error) {
 	defer documents.Stop()
 	var result []domain.MeetingType
 	for {

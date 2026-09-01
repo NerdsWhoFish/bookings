@@ -41,6 +41,16 @@ func (m *Memory) ListMeetingTypes(context.Context) ([]domain.MeetingType, error)
 	return result, nil
 }
 
+func (m *Memory) ListAllMeetingTypes(context.Context) ([]domain.MeetingType, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]domain.MeetingType, 0, len(m.meetings))
+	for _, meeting := range m.meetings {
+		result = append(result, meeting)
+	}
+	return result, nil
+}
+
 func (m *Memory) GetMeetingType(_ context.Context, slug string) (domain.MeetingType, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
