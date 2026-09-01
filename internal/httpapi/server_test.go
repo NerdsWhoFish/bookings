@@ -10,11 +10,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NerdsWhoFish/bookings/internal/booking"
+	calendarprovider "github.com/NerdsWhoFish/bookings/internal/calendar"
 	"github.com/NerdsWhoFish/bookings/internal/config"
 	"github.com/NerdsWhoFish/bookings/internal/domain"
 	"github.com/NerdsWhoFish/bookings/internal/securetoken"
 	"github.com/NerdsWhoFish/bookings/internal/store"
 )
+
+func TestAvailabilityReturnsJSONArrayWhenNoSlotsExist(t *testing.T) {
+	meeting := domain.MeetingType{
+		ID:                  "empty",
+		Slug:                "empty",
+		DurationMinutes:     20,
+		BookingWindowDays:   30,
+		SlotIntervalMinutes: 30,
+		TimeZone:            "UTC",
+		Active:              true,
+	}
+	data := store.NewMemory([]domain.MeetingType{meeting})
+	server := &Server{
+		store:    data,
+		bookings: booking.NewService(data, calendarprovider.Mock{}),
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/public/meeting-types/empty/availability", nil)
+	request.SetPathValue("slug", "empty")
+	response := httptest.NewRecorder()
+
+	server.availability(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected response: %d, %s", response.Code, response.Body)
+	}
+	if got := strings.TrimSpace(response.Body.String()); got != "[]" {
+		t.Fatalf("expected an empty JSON array, got %s", got)
+	}
+}
 
 func TestValidateCalendarInvitationRejectsInvalidExpiredAndUsedTokens(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
