@@ -86,6 +86,34 @@ func TestSortMeetingTypesIsStableByDurationThenName(t *testing.T) {
 	}
 }
 
+func TestValidateMeetingTypeRequiresHalfHourStartSpacing(t *testing.T) {
+	meeting := domain.MeetingType{
+		ID:                  "quick-cast",
+		Slug:                "quick-cast",
+		Name:                "Quick cast",
+		DurationMinutes:     20,
+		BookingWindowDays:   30,
+		SlotIntervalMinutes: 30,
+		TimeZone:            "America/New_York",
+		Availability:        []domain.WeekdayHours{{Weekday: 1, Start: "09:00", End: "17:00"}},
+	}
+	if err := validateMeetingType(meeting); err != nil {
+		t.Fatalf("expected 30-minute spacing to be valid: %v", err)
+	}
+	meeting.SlotIntervalMinutes = 45
+	if err := validateMeetingType(meeting); err == nil {
+		t.Fatal("expected spacing outside 30-minute multiples to be rejected")
+	}
+}
+
+func TestNormalizeMeetingTypeMigratesLegacyStartSpacing(t *testing.T) {
+	meeting := domain.MeetingType{SlotIntervalMinutes: 10}
+	normalizeMeetingType(&meeting)
+	if meeting.SlotIntervalMinutes != 30 {
+		t.Fatalf("expected legacy spacing to normalize to 30, got %d", meeting.SlotIntervalMinutes)
+	}
+}
+
 func TestUnknownAPIPathDoesNotServeTheWebApplication(t *testing.T) {
 	handler := New(config.Config{}, store.NewMemory(nil), nil, nil, nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	request := httptest.NewRequest(http.MethodPut, "/api/not-a-route", nil)

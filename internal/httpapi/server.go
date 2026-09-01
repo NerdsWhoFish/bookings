@@ -153,6 +153,7 @@ func (s *Server) meetingType(response http.ResponseWriter, request *http.Request
 		s.problem(response, request, statusFor(err), "Meeting type not found", err)
 		return
 	}
+	normalizeMeetingType(&meeting)
 	meeting.AttendeeEmails = []string{}
 	meeting.BlockerEmails = []string{}
 	writeJSON(response, http.StatusOK, meeting)
@@ -700,7 +701,7 @@ func validateMeetingType(meeting domain.MeetingType) error {
 	if meeting.ID == "" || meeting.Slug == "" || meeting.Name == "" || meeting.TimeZone == "" || meeting.DurationMinutes < 5 || meeting.DurationMinutes > 480 {
 		return errors.New("id, slug, name, time zone, and a duration from 5 to 480 minutes are required")
 	}
-	if meeting.SlotIntervalMinutes < 5 || meeting.BookingWindowDays < 1 || meeting.BookingWindowDays > 365 {
+	if meeting.SlotIntervalMinutes < domain.DefaultSlotIntervalMinutes || meeting.SlotIntervalMinutes%domain.DefaultSlotIntervalMinutes != 0 || meeting.BookingWindowDays < 1 || meeting.BookingWindowDays > 365 {
 		return errors.New("slot interval and booking window are outside supported bounds")
 	}
 	if _, err := time.LoadLocation(meeting.TimeZone); err != nil {
@@ -824,12 +825,17 @@ func validateCalendarInvitation(invitation domain.CalendarInvitation, secret str
 
 func normalizeMeetingTypes(meetings []domain.MeetingType) {
 	for index := range meetings {
-		if meetings[index].AttendeeEmails == nil {
-			meetings[index].AttendeeEmails = []string{}
-		}
-		if meetings[index].BlockerEmails == nil {
-			meetings[index].BlockerEmails = []string{}
-		}
+		normalizeMeetingType(&meetings[index])
+	}
+}
+
+func normalizeMeetingType(meeting *domain.MeetingType) {
+	meeting.SlotIntervalMinutes = domain.NormalizeSlotIntervalMinutes(meeting.SlotIntervalMinutes)
+	if meeting.AttendeeEmails == nil {
+		meeting.AttendeeEmails = []string{}
+	}
+	if meeting.BlockerEmails == nil {
+		meeting.BlockerEmails = []string{}
 	}
 }
 

@@ -13,9 +13,10 @@ func Slots(meeting domain.MeetingType, from, now time.Time, busy []domain.BusyPe
 	if err != nil {
 		return nil, fmt.Errorf("load meeting time zone: %w", err)
 	}
-	if meeting.DurationMinutes <= 0 || meeting.SlotIntervalMinutes <= 0 {
-		return nil, fmt.Errorf("duration and slot interval must be positive")
+	if meeting.DurationMinutes <= 0 {
+		return nil, fmt.Errorf("duration must be positive")
 	}
+	interval := time.Duration(domain.NormalizeSlotIntervalMinutes(meeting.SlotIntervalMinutes)) * time.Minute
 
 	windowStart := from.In(location)
 	if earliest := now.Add(time.Duration(meeting.MinimumNoticeMinutes) * time.Minute); earliest.After(windowStart) {
@@ -41,7 +42,7 @@ func Slots(meeting domain.MeetingType, from, now time.Time, busy []domain.BusyPe
 			if err != nil {
 				return nil, err
 			}
-			for candidate := ceil(start, time.Duration(meeting.SlotIntervalMinutes)*time.Minute); ; candidate = candidate.Add(time.Duration(meeting.SlotIntervalMinutes) * time.Minute) {
+			for candidate := ceilLocal(start, interval); ; candidate = candidate.Add(interval) {
 				slot := domain.Slot{Start: candidate, End: candidate.Add(time.Duration(meeting.DurationMinutes) * time.Minute)}
 				if slot.End.After(end) {
 					break
@@ -80,8 +81,9 @@ func clockOn(day time.Time, clock string) (time.Time, error) {
 	return time.Date(day.Year(), day.Month(), day.Day(), value.Hour(), value.Minute(), 0, 0, day.Location()), nil
 }
 
-func ceil(value time.Time, interval time.Duration) time.Time {
-	remainder := time.Duration(value.UnixNano() % int64(interval))
+func ceilLocal(value time.Time, interval time.Duration) time.Time {
+	day := startOfDay(value)
+	remainder := value.Sub(day) % interval
 	if remainder == 0 {
 		return value
 	}
