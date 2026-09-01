@@ -22,8 +22,9 @@ export default function App() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
 
   useEffect(() => {
-    Promise.all([api.config(), api.meetingTypes()])
-      .then(([nextConfig, nextMeetings]) => {
+    const load = async () => {
+      try {
+        const [nextConfig, nextMeetings] = await Promise.all([api.config(), api.meetingTypes()])
         setConfig(nextConfig)
         setMeetings(nextMeetings)
         if (nextConfig.faroURL) {
@@ -36,9 +37,20 @@ export default function App() {
             app: { name: nextConfig.faroAppName, version: 'dev', environment: 'production' },
           })
         }
-      })
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false))
+        const slug = directMeetingSlug()
+        if (slug) {
+          const selected = nextMeetings.find((item) => item.slug === slug) ?? await api.meetingType(slug)
+          setMeeting(selected)
+          setStep('time')
+          setSlots(await api.availability(selected.slug))
+        }
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not load the booking page')
+      } finally {
+        setLoading(false)
+      }
+    }
+    void load()
   }, [])
 
   const chooseMeeting = async (selected: MeetingType) => {
@@ -56,6 +68,7 @@ export default function App() {
   }
 
   const restart = () => {
+	if (window.location.pathname.startsWith('/meet/')) window.history.pushState(null, '', '/')
     setStep('type')
     setMeeting(null)
     setSlot(null)
@@ -105,9 +118,8 @@ function MeetingPicker({ meetings, loading, onChoose }: { meetings: MeetingType[
     <div className="section-heading"><span className="step-number">01</span><div><p className="kicker">Choose your depth</p><h2>What do you need?</h2></div></div>
     {loading ? <Skeleton /> : <div className="meeting-list">
       {meetings.map((meeting) => <button className="meeting-card" key={meeting.id} onClick={() => onChoose(meeting)}>
+        <span className="meeting-card-copy"><strong>{meeting.name}</strong><span>{meeting.description}</span></span>
         <span className="meeting-duration"><Clock3 size={17} /> {meeting.durationMinutes} min</span>
-        <strong>{meeting.name}</strong>
-        <span>{meeting.description}</span>
         <MoveRight className="meeting-arrow" aria-hidden="true" />
       </button>)}
     </div>}
@@ -210,4 +222,13 @@ function groupByDay(slots: Slot[], timeZone: string): [string, Slot[]][] {
 
 function format(value: string, timeZone: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat(undefined, { timeZone, ...options }).format(new Date(value))
+}
+
+function directMeetingSlug() {
+  if (!window.location.pathname.startsWith('/meet/')) return ''
+  try {
+    return decodeURIComponent(window.location.pathname.slice('/meet/'.length))
+  } catch {
+    return ''
+  }
 }
