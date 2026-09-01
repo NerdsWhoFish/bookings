@@ -28,7 +28,7 @@ func Slots(meeting domain.MeetingType, from, now time.Time, busy []domain.BusyPe
 	}
 
 	sort.Slice(busy, func(i, j int) bool { return busy[i].Start.Before(busy[j].Start) })
-	var slots []domain.Slot
+	slots := make([]domain.Slot, 0)
 	for day := startOfDay(windowStart); day.Before(windowEnd); day = day.AddDate(0, 0, 1) {
 		for _, hours := range meeting.Availability {
 			if int(day.Weekday()) != hours.Weekday {

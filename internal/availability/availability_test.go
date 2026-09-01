@@ -65,3 +65,26 @@ func TestSlotsNormalizesLegacyIntervalsToLocalHalfHours(t *testing.T) {
 		}
 	}
 }
+
+func TestSlotsReturnsAnEmptyListWhenNothingIsAvailable(t *testing.T) {
+	meeting := domain.MeetingType{
+		DurationMinutes:     20,
+		BookingWindowDays:   1,
+		SlotIntervalMinutes: 30,
+		TimeZone:            "America/New_York",
+		Availability:        []domain.WeekdayHours{{Weekday: int(time.Tuesday), Start: "09:00", End: "10:00"}},
+	}
+	now := time.Date(2026, 9, 6, 8, 0, 0, 0, time.UTC)
+	from := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+
+	slots, err := Slots(meeting, from, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slots == nil {
+		t.Fatal("expected an empty list, got nil")
+	}
+	if len(slots) != 0 {
+		t.Fatalf("expected no slots, got %#v", slots)
+	}
+}
