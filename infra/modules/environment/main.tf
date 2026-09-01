@@ -26,6 +26,7 @@ locals {
     session_key                = "${local.name_prefix}-session-key"
     turnstile_secret           = "${local.name_prefix}-turnstile-secret"
     otel_exporter_headers      = "${local.name_prefix}-otel-exporter-headers"
+    external_block_api_token   = "${local.name_prefix}-external-block-token"
   }
 }
 
@@ -277,11 +278,13 @@ resource "google_cloud_run_v2_service" "bookings" {
       }
 
       dynamic "env" {
-        for_each = {
+        for_each = merge({
           BOOKINGS_GOOGLE_CLIENT_SECRET = "google_oauth_client_secret"
           BOOKINGS_SESSION_KEY          = "session_key"
           BOOKINGS_TURNSTILE_SECRET     = "turnstile_secret"
-        }
+          }, var.external_blocks_enabled ? {
+          BOOKINGS_EXTERNAL_BLOCK_TOKEN = "external_block_api_token"
+        } : {})
         content {
           name = env.key
           value_source {

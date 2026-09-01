@@ -46,3 +46,27 @@ func TestOAuthStateRoundTrip(t *testing.T) {
 		t.Fatal("expected mismatched state to fail")
 	}
 }
+
+func TestCalendarInviteBridgeRoundTripAndClear(t *testing.T) {
+	manager := NewManager("01234567890123456789012345678901", false)
+	response := httptest.NewRecorder()
+	if err := manager.IssueCalendarInviteBridge(response, "invite-id"); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("GET", "/api/admin/google/callback", nil)
+	request.AddCookie(response.Result().Cookies()[0])
+	bridge, err := manager.ReadCalendarInviteBridge(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bridge.InvitationID != "invite-id" {
+		t.Fatalf("unexpected invitation id %q", bridge.InvitationID)
+	}
+
+	cleared := httptest.NewRecorder()
+	manager.ClearCalendarInviteBridge(cleared)
+	cookie := cleared.Result().Cookies()[0]
+	if cookie.MaxAge != -1 || cookie.Path != "/api/admin/google/callback" {
+		t.Fatalf("unexpected clearing cookie: %#v", cookie)
+	}
+}

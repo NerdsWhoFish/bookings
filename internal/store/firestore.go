@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -21,11 +22,31 @@ func NewFirestore(client *firestore.Client) *Firestore {
 }
 
 func (s *Firestore) ListMeetingTypes(ctx context.Context) ([]domain.MeetingType, error) {
-	return s.listMeetingTypes(s.client.Collection("meeting_types").Where("active", "==", true).Documents(ctx))
+	meetings, err := s.listMeetingTypes(s.client.Collection("meeting_types").Where("active", "==", true).Documents(ctx))
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]domain.MeetingType, 0, len(meetings))
+	for _, meeting := range meetings {
+		if !meeting.Hidden && !meeting.Deleted {
+			visible = append(visible, meeting)
+		}
+	}
+	return visible, nil
 }
 
 func (s *Firestore) ListAllMeetingTypes(ctx context.Context) ([]domain.MeetingType, error) {
-	return s.listMeetingTypes(s.client.Collection("meeting_types").Documents(ctx))
+	meetings, err := s.listMeetingTypes(s.client.Collection("meeting_types").Documents(ctx))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.MeetingType, 0, len(meetings))
+	for _, meeting := range meetings {
+		if !meeting.Deleted {
+			result = append(result, meeting)
+		}
+	}
+	return result, nil
 }
 
 func (s *Firestore) listMeetingTypes(documents *firestore.DocumentIterator) ([]domain.MeetingType, error) {
@@ -54,7 +75,7 @@ func (s *Firestore) GetMeetingType(ctx context.Context, slug string) (domain.Mee
 		if err := document.DataTo(&meeting); err != nil {
 			return domain.MeetingType{}, err
 		}
-		if meeting.Active {
+		if meeting.Active && !meeting.Deleted {
 			return meeting, nil
 		}
 	} else if status.Code(err) != codes.NotFound {
@@ -73,11 +94,37 @@ func (s *Firestore) GetMeetingType(ctx context.Context, slug string) (domain.Mee
 	if err := document.DataTo(&meeting); err != nil {
 		return domain.MeetingType{}, err
 	}
+	if meeting.Deleted {
+		return domain.MeetingType{}, ErrNotFound
+	}
+	return meeting, nil
+}
+
+func (s *Firestore) GetMeetingTypeRecord(ctx context.Context, id string) (domain.MeetingType, error) {
+	document, err := s.client.Collection("meeting_types").Doc(id).Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return domain.MeetingType{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.MeetingType{}, err
+	}
+	var meeting domain.MeetingType
+	if err := document.DataTo(&meeting); err != nil {
+		return domain.MeetingType{}, err
+	}
 	return meeting, nil
 }
 
 func (s *Firestore) PutMeetingType(ctx context.Context, meeting domain.MeetingType) error {
 	_, err := s.client.Collection("meeting_types").Doc(meeting.ID).Set(ctx, meeting)
+	return err
+}
+
+func (s *Firestore) DeleteMeetingType(ctx context.Context, id string) error {
+	_, err := s.client.Collection("meeting_types").Doc(id).Update(ctx, []firestore.Update{{Path: "deleted", Value: true}}, firestore.Exists)
+	if status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.NotFound {
+		return ErrNotFound
+	}
 	return err
 }
 
@@ -122,6 +169,129 @@ func (s *Firestore) PutConnection(ctx context.Context, connection domain.Calenda
 	return err
 }
 
+func (s *Firestore) ListCalendarInvitations(ctx context.Context) ([]domain.CalendarInvitation, error) {
+	documents := s.client.Collection("calendar_invitations").Documents(ctx)
+	defer documents.Stop()
+	result := make([]domain.CalendarInvitation, 0)
+	for {
+		document, err := documents.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var invitation domain.CalendarInvitation
+		if err := document.DataTo(&invitation); err != nil {
+			return nil, err
+		}
+		result = append(result, invitation)
+	}
+	return result, nil
+}
+
+func (s *Firestore) GetCalendarInvitation(ctx context.Context, id string) (domain.CalendarInvitation, error) {
+	document, err := s.client.Collection("calendar_invitations").Doc(id).Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return domain.CalendarInvitation{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.CalendarInvitation{}, err
+	}
+	var invitation domain.CalendarInvitation
+	if err := document.DataTo(&invitation); err != nil {
+		return domain.CalendarInvitation{}, err
+	}
+	return invitation, nil
+}
+
+func (s *Firestore) PutCalendarInvitation(ctx context.Context, invitation domain.CalendarInvitation) error {
+	_, err := s.client.Collection("calendar_invitations").Doc(invitation.ID).Create(ctx, invitation)
+	if status.Code(err) == codes.AlreadyExists {
+		return ErrConflict
+	}
+	return err
+}
+
+func (s *Firestore) DeleteCalendarInvitation(ctx context.Context, id string) error {
+	_, err := s.client.Collection("calendar_invitations").Doc(id).Delete(ctx, firestore.Exists)
+	if status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.NotFound {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (s *Firestore) UseCalendarInvitation(ctx context.Context, id, email string, now time.Time) error {
+	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		ref := s.client.Collection("calendar_invitations").Doc(id)
+		document, err := tx.Get(ref)
+		if status.Code(err) == codes.NotFound {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var invitation domain.CalendarInvitation
+		if err := document.DataTo(&invitation); err != nil {
+			return err
+		}
+		if invitation.UsedAt != nil {
+			return ErrAlreadyUsed
+		}
+		if !now.Before(invitation.ExpiresAt) {
+			return ErrExpired
+		}
+		if !strings.EqualFold(invitation.Email, email) {
+			return ErrEmailMismatch
+		}
+		return tx.Update(ref, []firestore.Update{{Path: "used_at", Value: now.UTC()}})
+	})
+}
+
+func (s *Firestore) ListExternalBlocks(ctx context.Context, start, end time.Time) ([]domain.ExternalBlock, error) {
+	documents := s.client.Collection("external_blocks").Where("end", ">", start).Documents(ctx)
+	defer documents.Stop()
+	result := make([]domain.ExternalBlock, 0)
+	for {
+		document, err := documents.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var block domain.ExternalBlock
+		if err := document.DataTo(&block); err != nil {
+			return nil, err
+		}
+		if block.Start.Before(end) {
+			result = append(result, block)
+		}
+	}
+	return result, nil
+}
+
+func (s *Firestore) PutExternalBlock(ctx context.Context, block domain.ExternalBlock) error {
+	ref := s.client.Collection("external_blocks").Doc(block.ID)
+	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if existing, err := tx.Get(ref); err == nil {
+			var stored domain.ExternalBlock
+			if err := existing.DataTo(&stored); err != nil {
+				return err
+			}
+			block.CreatedAt = stored.CreatedAt
+		} else if status.Code(err) != codes.NotFound {
+			return err
+		}
+		return tx.Set(ref, block)
+	})
+}
+
+func (s *Firestore) DeleteExternalBlock(ctx context.Context, id string) error {
+	_, err := s.client.Collection("external_blocks").Doc(id).Delete(ctx)
+	return err
+}
+
 func (s *Firestore) ClaimBooking(ctx context.Context, booking domain.Booking) error {
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		bookingRef := s.client.Collection("bookings").Doc(booking.ID)
@@ -152,10 +322,11 @@ func (s *Firestore) ClaimBooking(ctx context.Context, booking domain.Booking) er
 	}, firestore.MaxAttempts(32))
 }
 
-func (s *Firestore) ConfirmBooking(ctx context.Context, id, eventID string) error {
+func (s *Firestore) ConfirmBooking(ctx context.Context, id, eventID string, shadowEventIDs []string) error {
 	_, err := s.client.Collection("bookings").Doc(id).Update(ctx, []firestore.Update{
 		{Path: "status", Value: "confirmed"},
 		{Path: "event_id", Value: eventID},
+		{Path: "shadow_event_ids", Value: shadowEventIDs},
 		{Path: "updated_at", Value: time.Now().UTC()},
 	})
 	return err

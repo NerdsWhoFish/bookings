@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +11,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	calendarprovider "github.com/NerdsWhoFish/bookings/internal/calendar"
 	"github.com/NerdsWhoFish/bookings/internal/config"
 	"github.com/NerdsWhoFish/bookings/internal/domain"
+	"github.com/NerdsWhoFish/bookings/internal/securetoken"
 	"github.com/NerdsWhoFish/bookings/internal/store"
 	"github.com/NerdsWhoFish/bookings/internal/tokencrypto"
 	"github.com/NerdsWhoFish/bookings/internal/webui"
@@ -46,17 +50,25 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /api/public/config", server.publicConfig)
 	mux.HandleFunc("GET /api/public/meeting-types", server.meetingTypes)
+	mux.HandleFunc("GET /api/public/meeting-types/{slug}", server.meetingType)
 	mux.HandleFunc("GET /api/public/meeting-types/{slug}/availability", server.availability)
+	mux.HandleFunc("POST /api/public/calendar-invitations/start", server.calendarInvitationStart)
 	mux.HandleFunc("POST /api/public/bookings", server.createBooking)
 	mux.HandleFunc("POST /api/public/bookings/{id}/cancel", server.cancelBooking)
+	mux.HandleFunc("PUT /api/external/blocks/{id}", server.external(server.putExternalBlock))
+	mux.HandleFunc("DELETE /api/external/blocks/{id}", server.external(server.deleteExternalBlock))
 	mux.HandleFunc("GET /api/admin/session", server.admin(server.adminSession))
 	mux.HandleFunc("GET /api/admin/connections", server.admin(server.connections))
+	mux.HandleFunc("GET /api/admin/calendar-invitations", server.admin(server.calendarInvitations))
+	mux.HandleFunc("POST /api/admin/calendar-invitations", server.admin(server.createCalendarInvitation))
+	mux.HandleFunc("DELETE /api/admin/calendar-invitations/{id}", server.admin(server.deleteCalendarInvitation))
 	mux.HandleFunc("GET /api/admin/meeting-types", server.admin(server.adminMeetingTypes))
 	mux.HandleFunc("GET /api/admin/connections/{id}/calendars", server.admin(server.connectionCalendars))
 	mux.HandleFunc("PUT /api/admin/connections/{id}", server.admin(server.putConnection))
 	mux.HandleFunc("GET /api/admin/google/start", server.googleStart)
 	mux.HandleFunc("GET /api/admin/google/callback", server.googleCallback)
 	mux.HandleFunc("PUT /api/admin/meeting-types/{id}", server.admin(server.putMeetingType))
+	mux.HandleFunc("DELETE /api/admin/meeting-types/{id}", server.admin(server.deleteMeetingType))
 	mux.Handle("/", webui.Handler())
 	return securityHeaders(otelhttp.NewHandler(server.requestLog(mux), "http.request"))
 }
@@ -126,7 +138,21 @@ func (s *Server) meetingTypes(response http.ResponseWriter, request *http.Reques
 		s.problem(response, request, http.StatusInternalServerError, "Could not load meeting types", err)
 		return
 	}
+	normalizeMeetingTypes(meetings)
+	sortMeetingTypes(meetings)
+	sanitizePublicMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
+}
+
+func (s *Server) meetingType(response http.ResponseWriter, request *http.Request) {
+	meeting, err := s.store.GetMeetingType(request.Context(), request.PathValue("slug"))
+	if err != nil {
+		s.problem(response, request, statusFor(err), "Meeting type not found", err)
+		return
+	}
+	meeting.AttendeeEmails = []string{}
+	meeting.BlockerEmails = []string{}
+	writeJSON(response, http.StatusOK, meeting)
 }
 
 func (s *Server) availability(response http.ResponseWriter, request *http.Request) {
@@ -210,6 +236,61 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) external(next http.HandlerFunc) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		if s.config.ExternalBlockToken == "" {
+			s.problem(response, request, http.StatusNotFound, "External block API is disabled", errors.New("external block token is not configured"))
+			return
+		}
+		expected := sha256.Sum256([]byte("Bearer " + s.config.ExternalBlockToken))
+		provided := sha256.Sum256([]byte(request.Header.Get("Authorization")))
+		if !hmac.Equal(expected[:], provided[:]) {
+			response.Header().Set("WWW-Authenticate", "Bearer")
+			s.problem(response, request, http.StatusUnauthorized, "Authentication required", errors.New("invalid external block token"))
+			return
+		}
+		next(response, request)
+	}
+}
+
+func (s *Server) putExternalBlock(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if !validExternalBlockID(id) {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid external block ID", errors.New("external block id is outside supported bounds"))
+		return
+	}
+	var body struct {
+		Start time.Time `json:"start"`
+		End   time.Time `json:"end"`
+	}
+	if err := decodeJSON(request, &body); err != nil || body.Start.IsZero() || !body.Start.Before(body.End) || body.End.Sub(body.Start) > 366*24*time.Hour {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Start and end must describe a valid block", errors.New("external block interval is outside supported bounds"))
+		return
+	}
+	now := time.Now().UTC()
+	block := domain.ExternalBlock{ID: id, Start: body.Start, End: body.End, CreatedAt: now, UpdatedAt: now}
+	if err := s.store.PutExternalBlock(request.Context(), block); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not save external block", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "external busy block saved")
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteExternalBlock(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if !validExternalBlockID(id) {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid external block ID", errors.New("external block id is outside supported bounds"))
+		return
+	}
+	if err := s.store.DeleteExternalBlock(request.Context(), id); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not delete external block", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "external busy block deleted")
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) adminSession(response http.ResponseWriter, request *http.Request) {
 	if s.config.DevMode {
 		writeJSON(response, http.StatusOK, auth.Session{Email: "developer@localhost", ExpiresAt: time.Now().Add(24 * time.Hour).Unix()})
@@ -228,12 +309,123 @@ func (s *Server) connections(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusOK, connections)
 }
 
+func (s *Server) calendarInvitations(response http.ResponseWriter, request *http.Request) {
+	invitations, err := s.store.ListCalendarInvitations(request.Context())
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not load calendar invitations", err)
+		return
+	}
+	sort.Slice(invitations, func(i, j int) bool { return invitations[i].CreatedAt.After(invitations[j].CreatedAt) })
+	writeJSON(response, http.StatusOK, invitations)
+}
+
+func (s *Server) createCalendarInvitation(response http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		s.problem(response, request, http.StatusBadRequest, "Invalid calendar invitation", err)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 254 {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Enter a valid email address", errors.New("invalid invitation email"))
+		return
+	}
+	if _, err := s.store.GetConnection(request.Context(), connectionID(email)); err == nil {
+		s.problem(response, request, http.StatusConflict, "That Google account is already connected", errors.New("connection already exists"))
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.problem(response, request, http.StatusInternalServerError, "Could not check connected accounts", err)
+		return
+	}
+	id, err := securetoken.RandomURL(16)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not create calendar invitation", err)
+		return
+	}
+	secret, err := securetoken.RandomURL(32)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not create calendar invitation", err)
+		return
+	}
+	now := time.Now().UTC()
+	invitation := domain.CalendarInvitation{
+		ID: id, Email: email, TokenHash: securetoken.Hash(secret),
+		ExpiresAt: now.Add(7 * 24 * time.Hour), CreatedAt: now,
+	}
+	if err := s.store.PutCalendarInvitation(request.Context(), invitation); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not save calendar invitation", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "calendar invitation created", "invitation_id", id)
+	writeJSON(response, http.StatusCreated, map[string]any{
+		"invitation": invitation,
+		"url":        strings.TrimRight(s.config.PublicURL, "/") + "/connect#" + id + "." + secret,
+	})
+}
+
+func (s *Server) deleteCalendarInvitation(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if err := s.store.DeleteCalendarInvitation(request.Context(), id); err != nil {
+		s.problem(response, request, statusFor(err), "Calendar invitation not found", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "calendar invitation revoked", "invitation_id", id)
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) calendarInvitationStart(response http.ResponseWriter, request *http.Request) {
+	if s.oauth == nil {
+		s.problem(response, request, http.StatusNotImplemented, "Google OAuth is disabled in development", errors.New("OAuth not configured"))
+		return
+	}
+	if !sameOrigin(request, s.config.PublicURL) {
+		s.problem(response, request, http.StatusForbidden, "Origin rejected", errors.New("cross-origin invitation request"))
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		s.problem(response, request, http.StatusBadRequest, "Invalid calendar invitation", err)
+		return
+	}
+	id, secret, ok := strings.Cut(body.Token, ".")
+	if !ok || id == "" || secret == "" {
+		s.problem(response, request, http.StatusGone, "This calendar invitation is invalid", errors.New("malformed invitation token"))
+		return
+	}
+	invitation, err := s.store.GetCalendarInvitation(request.Context(), id)
+	if err != nil {
+		s.problem(response, request, invitationStatus(err), "This calendar invitation is no longer available", err)
+		return
+	}
+	if err := validateCalendarInvitation(invitation, secret, time.Now()); err != nil {
+		s.problem(response, request, invitationStatus(err), "This calendar invitation is no longer available", err)
+		return
+	}
+	if err := s.sessions.IssueCalendarInviteBridge(response, invitation.ID); err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not start Google connection", err)
+		return
+	}
+	state, err := s.sessions.NewState(response)
+	if err != nil {
+		s.problem(response, request, http.StatusInternalServerError, "Could not start Google connection", err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"url": s.oauth.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)})
+}
+
 func (s *Server) adminMeetingTypes(response http.ResponseWriter, request *http.Request) {
 	meetings, err := s.store.ListAllMeetingTypes(request.Context())
 	if err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not load meeting types", err)
 		return
 	}
+	normalizeMeetingTypes(meetings)
+	sortMeetingTypes(meetings)
 	writeJSON(response, http.StatusOK, meetings)
 }
 
@@ -293,6 +485,7 @@ func (s *Server) googleStart(response http.ResponseWriter, request *http.Request
 		s.problem(response, request, http.StatusNotImplemented, "Google OAuth is disabled in development", errors.New("OAuth not configured"))
 		return
 	}
+	s.sessions.ClearCalendarInviteBridge(response)
 	state, err := s.sessions.NewState(response)
 	if err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not start sign in", err)
@@ -316,10 +509,28 @@ func (s *Server) googleCallback(response http.ResponseWriter, request *http.Requ
 		s.problem(response, request, http.StatusBadGateway, "Could not read Google account", err)
 		return
 	}
+	bridge, bridgeErr := s.sessions.ReadCalendarInviteBridge(request)
 	adminSession, sessionErr := s.sessions.Read(request)
-	if sessionErr != nil && !s.config.AdminEmails[strings.ToLower(email)] {
+	if bridgeErr != nil && sessionErr != nil && !s.config.AdminEmails[strings.ToLower(email)] {
 		s.problem(response, request, http.StatusForbidden, "This account is not an administrator", errors.New("email is not allowed"))
 		return
+	}
+	if bridgeErr == nil {
+		invitation, err := s.store.GetCalendarInvitation(request.Context(), bridge.InvitationID)
+		if err == nil && invitation.UsedAt != nil {
+			err = store.ErrAlreadyUsed
+		}
+		if err == nil && !time.Now().Before(invitation.ExpiresAt) {
+			err = store.ErrExpired
+		}
+		if err == nil && !strings.EqualFold(invitation.Email, email) {
+			err = store.ErrEmailMismatch
+		}
+		if err != nil {
+			s.sessions.ClearCalendarInviteBridge(response)
+			s.problem(response, request, invitationStatus(err), "This Google account does not match the calendar invitation", err)
+			return
+		}
 	}
 	encoded, err := json.Marshal(token)
 	if err != nil {
@@ -345,6 +556,17 @@ func (s *Server) googleCallback(response http.ResponseWriter, request *http.Requ
 		s.problem(response, request, http.StatusInternalServerError, "Could not save Google account", err)
 		return
 	}
+	if bridgeErr == nil {
+		if err := s.store.UseCalendarInvitation(request.Context(), bridge.InvitationID, email, time.Now()); err != nil {
+			s.sessions.ClearCalendarInviteBridge(response)
+			s.problem(response, request, invitationStatus(err), "Could not finish calendar invitation", err)
+			return
+		}
+		s.sessions.ClearCalendarInviteBridge(response)
+		s.logger.InfoContext(request.Context(), "calendar invitation accepted", "invitation_id", bridge.InvitationID, "connection_id", id)
+		http.Redirect(response, request, "/connect?status=connected", http.StatusFound)
+		return
+	}
 	adminEmail := email
 	if sessionErr == nil {
 		adminEmail = adminSession.Email
@@ -363,6 +585,15 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	meeting.ID = request.PathValue("id")
+	var err error
+	meeting.AttendeeEmails, err = normalizeEmailList(meeting.AttendeeEmails, 50)
+	if err == nil {
+		meeting.BlockerEmails, err = normalizeEmailList(meeting.BlockerEmails, 20)
+	}
+	if err != nil {
+		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid meeting type", err)
+		return
+	}
 	if err := validateMeetingType(meeting); err != nil {
 		s.problem(response, request, http.StatusUnprocessableEntity, "Invalid meeting type", err)
 		return
@@ -390,12 +621,45 @@ func (s *Server) putMeetingType(response http.ResponseWriter, request *http.Requ
 			s.problem(response, request, http.StatusUnprocessableEntity, "Destination calendar not found", errors.New("unknown destination calendar"))
 			return
 		}
+		connections, err := s.store.ListConnections(request.Context())
+		if err != nil {
+			s.problem(response, request, http.StatusInternalServerError, "Could not validate meeting attendees", err)
+			return
+		}
+		connected := make(map[string]bool, len(connections))
+		for _, item := range connections {
+			connected[strings.ToLower(item.Email)] = true
+		}
+		attendees := make(map[string]bool, len(meeting.AttendeeEmails))
+		for _, email := range meeting.AttendeeEmails {
+			if !connected[email] {
+				s.problem(response, request, http.StatusUnprocessableEntity, "Choose connected accounts as attendees", errors.New("unknown attendee"))
+				return
+			}
+			attendees[email] = true
+		}
+		for _, email := range meeting.BlockerEmails {
+			if connected[email] || attendees[email] {
+				s.problem(response, request, http.StatusUnprocessableEntity, "Private blocker addresses must not be connected attendees", errors.New("blocker address overlaps a connected account"))
+				return
+			}
+		}
 	}
 	if err := s.store.PutMeetingType(request.Context(), meeting); err != nil {
 		s.problem(response, request, http.StatusInternalServerError, "Could not save meeting type", err)
 		return
 	}
 	writeJSON(response, http.StatusOK, meeting)
+}
+
+func (s *Server) deleteMeetingType(response http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("id")
+	if err := s.store.DeleteMeetingType(request.Context(), id); err != nil {
+		s.problem(response, request, statusFor(err), "Meeting type not found", err)
+		return
+	}
+	s.logger.InfoContext(request.Context(), "meeting type deleted", "meeting_type_id", id)
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) problem(response http.ResponseWriter, request *http.Request, status int, title string, err error) {
@@ -448,6 +712,12 @@ func validateMeetingType(meeting domain.MeetingType) error {
 	if len(meeting.Availability) == 0 || len(meeting.Availability) > 7 {
 		return errors.New("at least one weekly availability window is required")
 	}
+	if _, err := normalizeEmailList(meeting.AttendeeEmails, 50); err != nil {
+		return errors.New("meeting attendees must be unique email addresses")
+	}
+	if _, err := normalizeEmailList(meeting.BlockerEmails, 20); err != nil {
+		return errors.New("private blocker addresses must be unique email addresses")
+	}
 	seen := make(map[int]bool)
 	for _, hours := range meeting.Availability {
 		start, startErr := time.Parse("15:04", hours.Start)
@@ -472,6 +742,36 @@ func validSlug(value string) bool {
 	return true
 }
 
+func validExternalBlockID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') && !strings.ContainsRune("._:-", character) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeEmailList(values []string, limit int) ([]string, error) {
+	if len(values) > limit {
+		return nil, errors.New("too many email addresses")
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		email := strings.ToLower(strings.TrimSpace(value))
+		address, err := mail.ParseAddress(email)
+		if err != nil || address.Address != email || seen[email] {
+			return nil, errors.New("email addresses must be valid and unique")
+		}
+		seen[email] = true
+		result = append(result, email)
+	}
+	return result, nil
+}
+
 func decodeJSON(request *http.Request, target any) error {
 	request.Body = http.MaxBytesReader(nil, request.Body, 32<<10)
 	decoder := json.NewDecoder(request.Body)
@@ -494,6 +794,56 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	}
 	return http.StatusBadRequest
+}
+
+func invitationStatus(err error) int {
+	if errors.Is(err, store.ErrEmailMismatch) {
+		return http.StatusForbidden
+	}
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrExpired) || errors.Is(err, store.ErrAlreadyUsed) {
+		return http.StatusGone
+	}
+	return http.StatusBadRequest
+}
+
+func validateCalendarInvitation(invitation domain.CalendarInvitation, secret string, now time.Time) error {
+	if invitation.UsedAt != nil {
+		return store.ErrAlreadyUsed
+	}
+	if !now.Before(invitation.ExpiresAt) {
+		return store.ErrExpired
+	}
+	if !securetoken.EqualHash(secret, invitation.TokenHash) {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func normalizeMeetingTypes(meetings []domain.MeetingType) {
+	for index := range meetings {
+		if meetings[index].AttendeeEmails == nil {
+			meetings[index].AttendeeEmails = []string{}
+		}
+		if meetings[index].BlockerEmails == nil {
+			meetings[index].BlockerEmails = []string{}
+		}
+	}
+}
+
+func sanitizePublicMeetingTypes(meetings []domain.MeetingType) {
+	for index := range meetings {
+		meetings[index].AttendeeEmails = []string{}
+		meetings[index].BlockerEmails = []string{}
+	}
+}
+
+func sortMeetingTypes(meetings []domain.MeetingType) {
+	sort.SliceStable(meetings, func(i, j int) bool {
+		if meetings[i].DurationMinutes != meetings[j].DurationMinutes {
+			return meetings[i].DurationMinutes < meetings[j].DurationMinutes
+		}
+		return strings.ToLower(meetings[i].Name) < strings.ToLower(meetings[j].Name)
+	})
 }
 
 func connectionID(email string) string {

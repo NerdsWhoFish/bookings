@@ -13,11 +13,19 @@ import (
 	"time"
 )
 
-const sessionCookie = "bookings_admin"
+const (
+	sessionCookie      = "bookings_admin"
+	inviteBridgeCookie = "bookings_calendar_invite"
+)
 
 type Session struct {
 	Email     string `json:"email"`
 	ExpiresAt int64  `json:"expiresAt"`
+}
+
+type CalendarInviteBridge struct {
+	InvitationID string `json:"invitationId"`
+	ExpiresAt    int64  `json:"expiresAt"`
 }
 
 type Manager struct {
@@ -54,6 +62,41 @@ func (m *Manager) Read(request *http.Request) (Session, error) {
 		return Session{}, errors.New("session expired")
 	}
 	return session, nil
+}
+
+func (m *Manager) IssueCalendarInviteBridge(response http.ResponseWriter, invitationID string) error {
+	bridge := CalendarInviteBridge{InvitationID: invitationID, ExpiresAt: time.Now().Add(10 * time.Minute).Unix()}
+	encoded, err := m.sign(bridge)
+	if err != nil {
+		return err
+	}
+	http.SetCookie(response, &http.Cookie{
+		Name: inviteBridgeCookie, Value: encoded, Path: "/api/admin/google/callback", MaxAge: 600,
+		HttpOnly: true, Secure: m.secure, SameSite: http.SameSiteLaxMode,
+	})
+	return nil
+}
+
+func (m *Manager) ReadCalendarInviteBridge(request *http.Request) (CalendarInviteBridge, error) {
+	cookie, err := request.Cookie(inviteBridgeCookie)
+	if err != nil {
+		return CalendarInviteBridge{}, err
+	}
+	var bridge CalendarInviteBridge
+	if err := m.verify(cookie.Value, &bridge); err != nil {
+		return CalendarInviteBridge{}, err
+	}
+	if bridge.ExpiresAt < time.Now().Unix() || bridge.InvitationID == "" {
+		return CalendarInviteBridge{}, errors.New("calendar invitation session expired")
+	}
+	return bridge, nil
+}
+
+func (m *Manager) ClearCalendarInviteBridge(response http.ResponseWriter) {
+	http.SetCookie(response, &http.Cookie{
+		Name: inviteBridgeCookie, Value: "", Path: "/api/admin/google/callback", MaxAge: -1,
+		HttpOnly: true, Secure: m.secure, SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func (m *Manager) NewState(response http.ResponseWriter) (string, error) {

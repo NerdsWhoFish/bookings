@@ -6,7 +6,7 @@ import (
 )
 
 func TestPersistedTypesDeclareFirestoreTags(t *testing.T) {
-	for _, value := range []any{MeetingType{}, WeekdayHours{}, CalendarConnection{}, Booking{}} {
+	for _, value := range []any{MeetingType{}, WeekdayHours{}, CalendarConnection{}, CalendarInvitation{}, Booking{}, ExternalBlock{}} {
 		typeOf := reflect.TypeOf(value)
 		for index := 0; index < typeOf.NumField(); index++ {
 			field := typeOf.Field(index)

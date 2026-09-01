@@ -3,14 +3,17 @@ package calendar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/NerdsWhoFish/bookings/internal/domain"
 	"github.com/NerdsWhoFish/bookings/internal/tokencrypto"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/calendar/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -98,7 +101,7 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 	if err != nil {
 		return "", err
 	}
-	event := eventForBooking(booking, meeting)
+	event := eventForBooking(booking, meeting, connection.Email)
 	insert := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx)
 	if meeting.Location == "Google Meet" {
 		event.ConferenceData = &calendar.ConferenceData{CreateRequest: &calendar.CreateConferenceRequest{
@@ -118,7 +121,38 @@ func (g *Google) CreateEvent(ctx context.Context, connection domain.CalendarConn
 	return created.Id, nil
 }
 
-func eventForBooking(booking domain.Booking, meeting domain.MeetingType) *calendar.Event {
+func (g *Google) CreateBlockEvent(ctx context.Context, connection domain.CalendarConnection, calendarID string, booking domain.Booking, meeting domain.MeetingType, blockerEmail string, sequence int) (string, error) {
+	service, err := g.service(ctx, connection)
+	if err != nil {
+		return "", err
+	}
+	event := eventForBlock(booking, meeting, blockerEmail, sequence)
+	created, err := service.Events.Insert(calendarID, event).SendUpdates("all").Context(ctx).Do()
+	if err != nil {
+		existing, getErr := service.Events.Get(calendarID, event.Id).Context(ctx).Do()
+		if getErr == nil {
+			return existing.Id, nil
+		}
+		return "", fmt.Errorf("create private calendar block: %w", err)
+	}
+	return created.Id, nil
+}
+
+func eventForBooking(booking domain.Booking, meeting domain.MeetingType, organizerEmail string) *calendar.Event {
+	attendees := make([]*calendar.EventAttendee, 0, len(meeting.AttendeeEmails)+1)
+	seen := map[string]bool{strings.ToLower(organizerEmail): true}
+	guestEmail := strings.ToLower(booking.GuestEmail)
+	if !seen[guestEmail] {
+		attendees = append(attendees, &calendar.EventAttendee{Email: booking.GuestEmail, DisplayName: booking.GuestName})
+		seen[guestEmail] = true
+	}
+	for _, email := range meeting.AttendeeEmails {
+		key := strings.ToLower(email)
+		if key != "" && !seen[key] {
+			attendees = append(attendees, &calendar.EventAttendee{Email: email})
+			seen[key] = true
+		}
+	}
 	return &calendar.Event{
 		Id:          deterministicEventID(booking.ID),
 		Summary:     meeting.Name + " with " + booking.GuestName,
@@ -126,8 +160,25 @@ func eventForBooking(booking domain.Booking, meeting domain.MeetingType) *calend
 		Location:    meeting.Location,
 		Start:       &calendar.EventDateTime{DateTime: booking.Start.Format(time.RFC3339), TimeZone: meeting.TimeZone},
 		End:         &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
-		Attendees:   []*calendar.EventAttendee{{Email: booking.GuestEmail, DisplayName: booking.GuestName}},
+		Attendees:   attendees,
 		Reminders:   &calendar.EventReminders{UseDefault: false, ForceSendFields: []string{"UseDefault"}},
+	}
+}
+
+func eventForBlock(booking domain.Booking, meeting domain.MeetingType, blockerEmail string, sequence int) *calendar.Event {
+	return &calendar.Event{
+		Id:                      deterministicBlockEventID(booking.ID, sequence),
+		Summary:                 "Busy",
+		Start:                   &calendar.EventDateTime{DateTime: booking.Start.Format(time.RFC3339), TimeZone: meeting.TimeZone},
+		End:                     &calendar.EventDateTime{DateTime: booking.End.Format(time.RFC3339), TimeZone: meeting.TimeZone},
+		Attendees:               []*calendar.EventAttendee{{Email: blockerEmail}},
+		GuestsCanInviteOthers:   googleapi.Bool(false),
+		GuestsCanModify:         false,
+		GuestsCanSeeOtherGuests: googleapi.Bool(false),
+		Transparency:            "opaque",
+		Visibility:              "private",
+		Reminders:               &calendar.EventReminders{UseDefault: false, ForceSendFields: []string{"UseDefault"}},
+		ForceSendFields:         []string{"GuestsCanModify"},
 	}
 }
 
@@ -137,6 +188,10 @@ func (g *Google) DeleteEvent(ctx context.Context, connection domain.CalendarConn
 		return err
 	}
 	if err := service.Events.Delete(calendarID, eventID).SendUpdates("all").Context(ctx).Do(); err != nil {
+		var apiError *googleapi.Error
+		if errors.As(err, &apiError) && apiError.Code == 404 {
+			return nil
+		}
 		return fmt.Errorf("delete Google Calendar event: %w", err)
 	}
 	return nil
@@ -161,4 +216,8 @@ func (g *Google) service(ctx context.Context, connection domain.CalendarConnecti
 
 func deterministicEventID(bookingID string) string {
 	return "booking" + bookingID
+}
+
+func deterministicBlockEventID(bookingID string, sequence int) string {
+	return fmt.Sprintf("booking%sblock%d", bookingID, sequence)
 }

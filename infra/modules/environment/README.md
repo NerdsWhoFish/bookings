@@ -9,6 +9,7 @@ It creates:
 - Firestore Native with optimistic concurrency and slot-lock TTL
 - A KMS key for OAuth tokens
 - Secret Manager containers for runtime credentials
+- An optional bearer-authenticated API for externally pushed busy blocks
 - A least-privilege Cloud Run runtime service account
 - A GitHub OIDC release publisher with Artifact Registry write access
 - One public Cloud Run v2 service when `image_digest` is set

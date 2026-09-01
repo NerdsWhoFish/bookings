@@ -29,7 +29,8 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	stdout := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(stdout)
 	slog.SetDefault(logger)
 	cfg, err := config.Load()
 	if err != nil {
@@ -39,11 +40,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	shutdownTelemetry, err := telemetry.Start(ctx)
+	logger, shutdownTelemetry, err := telemetry.Start(ctx, stdout)
 	if err != nil {
 		logger.Error("telemetry setup failed", "error", err)
 		os.Exit(1)
 	}
+	slog.SetDefault(logger)
 	defer func() { _ = shutdownTelemetry(context.Background()) }()
 
 	data, provider, cipher, oauth, spam, closeClients, err := dependencies(ctx, cfg)
