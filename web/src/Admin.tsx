@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, CalendarCheck, Check, ExternalLink, Fish, Plus, Save } from 'lucide-react'
 import { api } from './api'
+import { normalizeBusyCalendarIDs } from './calendarSelection'
 import { ThemeProvider } from './ThemeProvider'
 import { themeByID } from './themes'
 import type { CalendarConnection, CalendarInfo, MeetingType, Session } from './types'
@@ -47,7 +48,12 @@ function ConnectionEditor({ connection, onSaved, onError }: { connection: Calend
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   const [selected, setSelected] = useState(connection.busyCalendarIds)
   const [saved, setSaved] = useState(false)
-  useEffect(() => { api.calendars(connection.id).then(setCalendars).catch((reason: Error) => onError(reason.message)) }, [connection.id, onError])
+  useEffect(() => {
+    api.calendars(connection.id).then((next) => {
+      setCalendars(next)
+      setSelected((values) => normalizeBusyCalendarIDs(values, next))
+    }).catch((reason: Error) => onError(reason.message))
+  }, [connection.id, onError])
   const toggle = (id: string) => setSelected((values) => values.includes(id) ? values.filter((value) => value !== id) : [...values, id])
   const save = async () => {
     try {
