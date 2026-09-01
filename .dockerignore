@@ -1,0 +1,7 @@
+.git
+.github
+**/.terraform/
+*.tfstate*
+**/node_modules/
+internal/webui/dist/
+web/*.tsbuildinfo

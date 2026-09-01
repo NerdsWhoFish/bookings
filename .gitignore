@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+web/node_modules/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
