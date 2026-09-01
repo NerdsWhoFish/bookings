@@ -124,7 +124,7 @@ function ConnectionEditor({ connection, onSaved, onError }: { connection: Calend
 }
 
 function MeetingEditor({ meeting, connections, onSaved, onDeleted, onError }: { meeting: MeetingType; connections: CalendarConnection[]; onSaved: (value: MeetingType) => void; onDeleted: (id: string) => void; onError: (message: string) => void }) {
-  const [draft, setDraft] = useState({ ...meeting, attendeeEmails: meeting.attendeeEmails ?? [] })
+  const [draft, setDraft] = useState({ ...meeting, attendeeEmails: meeting.attendeeEmails ?? [], blockerEmails: meeting.blockerEmails ?? [] })
   const [open, setOpen] = useState(meeting.name === 'New meeting type')
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   const [persisted, setPersisted] = useState(meeting.name !== 'New meeting type')
@@ -178,6 +178,7 @@ function MeetingEditor({ meeting, connections, onSaved, onDeleted, onError }: { 
       <label>Destination account<select value={draft.destinationConnectionId ?? ''} onChange={(event) => setDraft({ ...draft, destinationConnectionId: event.target.value, destinationCalendarId: '' })}><option value="">Development mock</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.email}</option>)}</select></label>
       <label>Destination calendar<select value={draft.destinationCalendarId ?? ''} disabled={!draft.destinationConnectionId} onChange={(event) => setDraft({ ...draft, destinationCalendarId: event.target.value })}><option value="">Choose a calendar</option>{calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.primary ? ' · primary' : ''}</option>)}</select></label>
       <fieldset className="attendee-editor wide-field"><legend>Connected account attendees</legend><p>Selected people are automatically added to every calendar event for this meeting type.</p>{connections.length === 0 ? <span>No connected accounts yet.</span> : <div className="calendar-checks">{connections.map((connection) => <label key={connection.id}><input type="checkbox" checked={draft.attendeeEmails.includes(connection.email)} onChange={() => toggleAttendee(connection.email)} /><span><Check size={13} />{connection.email}</span></label>)}</div>}</fieldset>
+      <label className="wide-field">Private blocker addresses<textarea rows={3} value={draft.blockerEmails.join('\n')} placeholder="work@example.com" onChange={(event) => setDraft({ ...draft, blockerEmails: event.target.value.split(/[\n,]/).map((email) => email.trim()).filter(Boolean) })} /><span className="field-help">One address per line. Each gets its own private "Busy" event with no guest details or other attendees.</span></label>
       <ScheduleEditor availability={draft.availability} onChange={(availability) => setDraft({ ...draft, availability })} />
       <label className="active-toggle"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />Available to book</label>
       <label className="active-toggle"><input type="checkbox" checked={draft.hidden} onChange={(event) => setDraft({ ...draft, hidden: event.target.checked })} />Hidden from the booking page (direct link still works)</label>
@@ -223,6 +224,7 @@ function newMeetingType(): MeetingType {
     destinationConnectionId: '',
     destinationCalendarId: '',
     attendeeEmails: [],
+    blockerEmails: [],
     availability: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, start: '09:00', end: '17:00' })),
     active: true,
     hidden: false,

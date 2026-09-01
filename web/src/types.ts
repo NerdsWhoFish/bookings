@@ -14,6 +14,7 @@ export type MeetingType = {
   destinationConnectionId: string
   destinationCalendarId: string
   attendeeEmails: string[]
+  blockerEmails: string[]
   availability: { weekday: number; start: string; end: string }[]
   active: boolean
   hidden: boolean
