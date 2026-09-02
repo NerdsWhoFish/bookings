@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CalendarDays, Check, Clock3, Fish, MapPin, MoveRight, Radio, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, Clock3, Fish, MapPin, MoveRight, Radio, Settings2, ShieldCheck } from 'lucide-react'
 import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
 import { TracingInstrumentation } from '@grafana/faro-web-tracing'
 import { api } from './api'
@@ -89,10 +89,13 @@ export default function App() {
       <main className="shell">
         <aside className="brand-panel">
           <div className="sonar" aria-hidden="true"><span /><span /><span /></div>
-          <a className="wordmark" href="/" onClick={(event) => { event.preventDefault(); restart() }}>
-            <Fish size={24} strokeWidth={2.4} />
-            <span>NerdsWho<span className="wordmark-fish">Fish</span></span>
-          </a>
+          <div className="brand-nav">
+            <a className="wordmark" href="/" onClick={(event) => { event.preventDefault(); restart() }}>
+              <Fish size={24} strokeWidth={2.4} />
+              <span>NerdsWho<span className="wordmark-fish">Fish</span></span>
+            </a>
+            <a className="mobile-admin-link" href="/admin"><Settings2 size={16} /> Admin</a>
+          </div>
           <div className="brand-copy">
             <p className="eyebrow"><Radio size={14} /> {theme.eyebrow}</p>
             <h1>{theme.headline}</h1>
