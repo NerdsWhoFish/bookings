@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, CalendarCheck, Check, Copy, ExternalLink, Fish, Link, Plus, Save, Trash2 } from 'lucide-react'
+import { ArrowLeft, CalendarCheck, Check, Copy, ExternalLink, Link, Plus, Save, Trash2 } from 'lucide-react'
 import { api } from './api'
+import { BrandLogo } from './BrandLogo'
 import { normalizeBusyCalendarIDs } from './calendarSelection'
 import { ThemeProvider } from './ThemeProvider'
 import { themeByID } from './themes'
@@ -28,7 +29,7 @@ export default function Admin() {
   return <ThemeProvider theme={themeByID('nerdswhofish')}>
     <main className="admin-shell">
       <header className="admin-header">
-        <a className="wordmark" href="/"><Fish size={24} /><span>NerdsWho<span className="wordmark-fish">Fish</span></span></a>
+        <BrandLogo href="/" />
         <a className="back-link" href="/"><ArrowLeft size={16} /> Public page</a>
       </header>
       <div className="admin-title"><p className="kicker">Booking controls</p><h1>Keep the calendars tidy.</h1><p>{session ? `Signed in as ${session.email}` : 'Connect an allowed Google account to manage this deployment.'}</p></div>

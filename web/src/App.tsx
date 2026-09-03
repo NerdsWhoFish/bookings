@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CalendarDays, Check, Clock3, Fish, MapPin, MoveRight, Radio, Settings2, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, Clock3, MapPin, MoveRight, Radio, Settings2, ShieldCheck } from 'lucide-react'
 import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
 import { TracingInstrumentation } from '@grafana/faro-web-tracing'
 import { api } from './api'
@@ -7,6 +7,7 @@ import { addDays, availabilityPageDays, formatInTimeZone, groupSlotsByDay, hasLa
 import { themeByID } from './themes'
 import { ThemeProvider } from './ThemeProvider'
 import { Turnstile } from './Turnstile'
+import { BrandLogo } from './BrandLogo'
 import type { Confirmation, MeetingType, PublicConfig, Slot } from './types'
 
 type Step = 'type' | 'time' | 'details' | 'done'
@@ -90,10 +91,7 @@ export default function App() {
         <aside className="brand-panel">
           <div className="sonar" aria-hidden="true"><span /><span /><span /></div>
           <div className="brand-nav">
-            <a className="wordmark" href="/" onClick={(event) => { event.preventDefault(); restart() }}>
-              <Fish size={24} strokeWidth={2.4} />
-              <span>NerdsWho<span className="wordmark-fish">Fish</span></span>
-            </a>
+            <BrandLogo href="/" onClick={(event) => { event.preventDefault(); restart() }} />
             <a className="mobile-admin-link" href="/admin"><Settings2 size={16} /> Admin</a>
           </div>
           <div className="brand-copy">
