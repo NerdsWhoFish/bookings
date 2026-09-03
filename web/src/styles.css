@@ -9,7 +9,7 @@
 
 html, body, #root { min-height: 100%; margin: 0; }
 
-body { background: #0b0e12; }
+body { background: #07090f; }
 
 button, input, textarea, select { font: inherit; }
 
@@ -75,16 +75,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .wordmark {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  color: var(--ink);
-  font-family: 'Bricolage Grotesque', sans-serif;
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: -0.035em;
   text-decoration: none;
 }
 
-.wordmark svg, .wordmark-fish { color: var(--primary); }
+.wordmark-logo {
+  display: block;
+  width: 190px;
+  height: auto;
+}
 
 .mobile-admin-link { display: none; }
 
@@ -376,7 +374,7 @@ input:hover, textarea:hover { border-color: #425056; }
   cursor: pointer;
 }
 
-.primary-button:hover { background: #77f6ad; }
+.primary-button:hover { background: #19b859; }
 .primary-button:disabled { cursor: wait; opacity: 0.55; }
 
 .turnstile { min-height: 65px; }
@@ -584,6 +582,7 @@ footer a:hover { color: var(--ink); }
   .shell { width: 100%; min-height: 100vh; margin: 0; border: 0; border-radius: 0; }
   .brand-panel { min-height: 270px; padding: 24px 20px; }
   .brand-copy { margin: 46px 0 10px; }
+  .wordmark-logo { width: 150px; }
   .eyebrow { margin-bottom: 10px; font-size: 0.66rem; }
   h1 { max-width: 390px; margin-bottom: 0; font-size: clamp(2.8rem, 14vw, 4rem); }
   .mobile-admin-link {

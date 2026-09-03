@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { CalendarCheck, ExternalLink, Fish, ShieldCheck } from 'lucide-react'
+import { CalendarCheck, ExternalLink, ShieldCheck } from 'lucide-react'
 import { api } from './api'
+import { BrandLogo } from './BrandLogo'
 import { ThemeProvider } from './ThemeProvider'
 import { themeByID } from './themes'
 
@@ -30,7 +31,7 @@ export default function Connect() {
 
   return <ThemeProvider theme={themeByID(themeID)}>
     <main className="connect-shell">
-      <a className="wordmark" href="/"><Fish size={24} /><span>NerdsWho<span className="wordmark-fish">Fish</span></span></a>
+      <BrandLogo href="/" />
       <section className="connect-card">
         <p className="kicker">Calendar invitation</p>
         {connected ? <>
