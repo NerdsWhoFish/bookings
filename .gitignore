@@ -7,6 +7,8 @@
 *.tfstate.*
 *.tfplan
 web/node_modules/
+web/public/telemetry.js
+web/public/telemetry.js.map
 web/*.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts

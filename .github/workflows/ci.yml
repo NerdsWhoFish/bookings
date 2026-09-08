@@ -70,4 +70,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: docker build -t bookings:ci .
+      - run: docker build --build-arg COMMIT="$GITHUB_SHA" -t bookings:ci .

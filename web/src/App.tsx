@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Clock3, MapPin, MoveRight, Radio, Settings2, ShieldCheck } from 'lucide-react'
-import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
-import { TracingInstrumentation } from '@grafana/faro-web-tracing'
 import { api } from './api'
 import { addDays, availabilityPageDays, formatInTimeZone, groupSlotsByDay, hasLaterAvailability, resolvedTimeZone } from './dateTime'
 import { themeByID } from './themes'
@@ -29,16 +27,6 @@ export default function App() {
         const [nextConfig, nextMeetings] = await Promise.all([api.config(), api.meetingTypes()])
         setConfig(nextConfig)
         setMeetings(nextMeetings)
-        if (nextConfig.faroURL) {
-          initializeFaro({
-            url: nextConfig.faroURL,
-            instrumentations: [
-              ...getWebInstrumentations({ captureConsole: true }),
-              new TracingInstrumentation(),
-            ],
-            app: { name: nextConfig.faroAppName, version: 'dev', environment: 'production' },
-          })
-        }
         const slug = directMeetingSlug()
         if (slug) {
           const selected = nextMeetings.find((item) => item.slug === slug) ?? await api.meetingType(slug)

@@ -58,7 +58,7 @@ Run the checks with:
 ```console
 make test
 make lint
-docker build -t bookings:local .
+docker build --build-arg COMMIT="$(git rev-parse HEAD)" -t bookings:local .
 ```
 
 ## Deploy with OpenTofu
@@ -205,6 +205,11 @@ At light use, Cloud Run should sit at zero compute cost while idle. Firestore's 
 The module defaults to a $5 monthly budget when a billing account ID is provided and caps Cloud Run at three instances. Budgets alert after spend has happened, so they are not a hard billing limit.
 
 ## Security notes
+
+Backend telemetry uses the OpenTelemetry SDK with W3C trace and baggage propagation.
+Context-aware logs carry trace and span identifiers in both stdout and OTLP exports.
+Startup failures are logged before a bounded telemetry shutdown, so dependency errors are flushed even when the process cannot start serving requests.
+Browser capture loads before the application on public, admin, and calendar-connection pages. It reports caught API and render failures through the versioned `@nerdswhofish/browser-telemetry` package bundled with this application. The server embeds the public collector configuration into each HTML response, so a failed configuration request cannot disable capture. Error messages, form values, calendar identifiers, URL queries, and fragments are filtered before export; allowed script paths and stack locations retain the build's full Git revision.
 
 - OAuth refresh tokens are encrypted with Cloud KMS and bound to their connection ID as authenticated data.
 - Runtime secrets are mounted from Secret Manager and never sent to the browser.
