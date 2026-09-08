@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, CalendarCheck, Check, Copy, ExternalLink, Link, Plus, Save, Trash2 } from 'lucide-react'
 import { api } from './api'
+import { captureError } from './telemetry-client'
 import { BrandLogo } from './BrandLogo'
 import { normalizeBusyCalendarIDs } from './calendarSelection'
 import { ThemeProvider } from './ThemeProvider'
@@ -71,7 +72,8 @@ function CalendarInvitationEditor({ invitations, onChange, onError }: { invitati
     try {
       await navigator.clipboard.writeText(url)
       setCopied(true)
-    } catch {
+    } catch (error) {
+      captureError(error, 'clipboard')
       onError('Could not copy the link. Select it and copy it manually.')
     }
   }

@@ -72,7 +72,7 @@ func New(cfg config.Config, data store.Store, bookings *booking.Service, calenda
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusNotFound, map[string]string{"title": "API route not found"})
 	})
-	mux.Handle("/", webui.Handler())
+	mux.Handle("/", webui.Handler(cfg.FaroURL, cfg.FaroAppName))
 	return securityHeaders(otelhttp.NewHandler(server.requestLog(mux), "http.request"))
 }
 

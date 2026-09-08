@@ -1,22 +1,32 @@
 import type { CalendarConnection, CalendarInfo, CalendarInvitation, Confirmation, CreatedCalendarInvitation, MeetingType, PublicConfig, Session, Slot } from './types'
+import { captureError } from './telemetry-client'
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  })
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({ title: 'Something went wrong' }))
-    throw new Error(problem.title ?? `Request failed with ${response.status}`)
+  try {
+    const response = await fetch(input, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({ title: 'Something went wrong' }))
+      throw new Error(problem.title ?? `Request failed with ${response.status}`)
+    }
+    if (response.status === 204) return undefined as T
+    return await response.json() as T
+  } catch (error) {
+    captureError(error, 'api')
+    throw error
   }
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
 }
 
 async function requestList<T>(input: RequestInfo, init?: RequestInit): Promise<T[]> {
   const value = await request<T[] | null>(input, init)
   if (value === null) return []
-  if (!Array.isArray(value)) throw new Error('Expected a list response')
+  if (!Array.isArray(value)) {
+    const error = new Error('Expected a list response')
+    captureError(error, 'api')
+    throw error
+  }
   return value
 }
 

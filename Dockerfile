@@ -1,4 +1,6 @@
 FROM node:26-alpine AS web
+ARG COMMIT
+ENV APP_VERSION=${COMMIT}
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
