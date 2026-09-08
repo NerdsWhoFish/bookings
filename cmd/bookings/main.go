@@ -29,29 +29,40 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	stdout := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(stdout)
 	slog.SetDefault(logger)
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("configuration rejected", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger, shutdownTelemetry, err := telemetry.Start(ctx, stdout)
+	telemetryLogger, shutdownTelemetry, err := telemetry.Start(ctx, stdout)
 	if err != nil {
 		logger.Error("telemetry setup failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	logger = telemetryLogger
 	slog.SetDefault(logger)
-	defer func() { _ = shutdownTelemetry(context.Background()) }()
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTelemetry(flushCtx); err != nil {
+			slog.New(stdout).Error("telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	data, provider, cipher, oauth, spam, closeClients, err := dependencies(ctx, cfg)
 	if err != nil {
 		logger.Error("dependency setup failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	defer closeClients()
 	service := booking.NewService(data, provider)
@@ -66,10 +77,12 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("bookings listening", "address", server.Addr, "development", cfg.DevMode)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("HTTP server failed", "error", err)
+			serverErrors <- err
 			stop()
 		}
 	}()
@@ -78,6 +91,13 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP shutdown failed", "error", err)
+		return 1
+	}
+	select {
+	case <-serverErrors:
+		return 1
+	default:
+		return 0
 	}
 }
 

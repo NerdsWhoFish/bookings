@@ -206,6 +206,10 @@ The module defaults to a $5 monthly budget when a billing account ID is provided
 
 ## Security notes
 
+Backend telemetry uses the OpenTelemetry SDK with W3C trace and baggage propagation.
+Context-aware logs carry trace and span identifiers in both stdout and OTLP exports.
+Startup failures are logged before a bounded telemetry shutdown, so dependency errors are flushed even when the process cannot start serving requests.
+
 - OAuth refresh tokens are encrypted with Cloud KMS and bound to their connection ID as authenticated data.
 - Runtime secrets are mounted from Secret Manager and never sent to the browser.
 - Browser telemetry receives only the public Faro collector URL and app name. General OTLP credentials stay server-side.
