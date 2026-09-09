@@ -137,6 +137,8 @@ The app requests email identity, calendar free/busy, event, and calendar-list sc
 
 The first allowed administrator signs in at `/admin`, connects a Google account, selects the calendars that count as busy, and assigns a destination account and calendar to each meeting type.
 
+The administrator page checks its session before loading protected calendar and meeting data. A session-probe 401 shows the sign-in action; network and server failures show an error instead. A cookie-free session probe remains an observable HTTP 401 without a server-error log. Invalid cookies and rejected protected requests retain error reporting.
+
 To add someone else's calendar, enter their Google account email under Connection links and send them the generated link. The link works once and expires after seven days. After they consent through Google, their account appears under Busy calendars and can be selected as an attendee on individual meeting types. Connecting through an invitation does not create an administrator session.
 
 ## Meeting types
