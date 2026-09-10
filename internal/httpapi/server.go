@@ -229,6 +229,10 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if _, err := s.sessions.Read(request); err != nil {
+			if request.Pattern == "GET /api/admin/session" && errors.Is(err, http.ErrNoCookie) {
+				writeJSONStatus(response, http.StatusUnauthorized, map[string]any{"title": "Sign in required", "status": http.StatusUnauthorized})
+				return
+			}
 			s.problem(response, request, http.StatusUnauthorized, "Sign in required", err)
 			return
 		}

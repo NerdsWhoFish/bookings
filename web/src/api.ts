@@ -1,7 +1,13 @@
 import type { CalendarConnection, CalendarInfo, CalendarInvitation, Confirmation, CreatedCalendarInvitation, MeetingType, PublicConfig, Session, Slot } from './types'
 import { captureError } from './telemetry-client'
 
-async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+class HTTPError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
+async function request<T>(input: RequestInfo, init?: RequestInit, expectedStatus?: number): Promise<T> {
   try {
     const response = await fetch(input, {
       ...init,
@@ -9,12 +15,12 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     })
     if (!response.ok) {
       const problem = await response.json().catch(() => ({ title: 'Something went wrong' }))
-      throw new Error(problem.title ?? `Request failed with ${response.status}`)
+      throw new HTTPError(problem.title ?? `Request failed with ${response.status}`, response.status)
     }
     if (response.status === 204) return undefined as T
     return await response.json() as T
   } catch (error) {
-    captureError(error, 'api')
+    if (!(error instanceof HTTPError && error.status === expectedStatus)) captureError(error, 'api')
     throw error
   }
 }
@@ -44,7 +50,20 @@ export const api = {
     guestNotes: string
     turnstileToken: string
   }) => request<Confirmation>('/api/public/bookings', { method: 'POST', body: JSON.stringify(body) }),
-  adminSession: () => request<Session>('/api/admin/session'),
+  adminSession: async (): Promise<Session | null> => {
+    try {
+      const session = await request<Session>('/api/admin/session', undefined, 401)
+      if (!session || typeof session.email !== 'string' || !session.email || !Number.isFinite(session.expiresAt)) {
+        const error = new Error('Invalid session response')
+        captureError(error, 'api')
+        throw error
+      }
+      return session
+    } catch (error) {
+      if (error instanceof HTTPError && error.status === 401) return null
+      throw error
+    }
+  },
   adminMeetingTypes: () => requestList<MeetingType>('/api/admin/meeting-types'),
   connections: () => requestList<CalendarConnection>('/api/admin/connections'),
   calendarInvitations: () => requestList<CalendarInvitation>('/api/admin/calendar-invitations'),

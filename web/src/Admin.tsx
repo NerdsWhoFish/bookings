@@ -10,6 +10,7 @@ import { formatMinutes } from './timeUnits'
 import type { CalendarConnection, CalendarInfo, CalendarInvitation, MeetingType, Session } from './types'
 
 export default function Admin() {
+  const [status, setStatus] = useState<'loading' | 'signed-out' | 'ready' | 'failed'>('loading')
   const [session, setSession] = useState<Session | null>(null)
   const [connections, setConnections] = useState<CalendarConnection[]>([])
   const [meetings, setMeetings] = useState<MeetingType[]>([])
@@ -17,14 +18,30 @@ export default function Admin() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.adminSession(), api.connections(), api.adminMeetingTypes(), api.calendarInvitations()])
-      .then(([nextSession, nextConnections, nextMeetings, nextInvitations]) => {
+    let active = true
+    const load = async () => {
+      try {
+        const nextSession = await api.adminSession()
+        if (!active) return
+        if (!nextSession) {
+          setStatus('signed-out')
+          return
+        }
+        const [nextConnections, nextMeetings, nextInvitations] = await Promise.all([api.connections(), api.adminMeetingTypes(), api.calendarInvitations()])
+        if (!active) return
         setSession(nextSession)
         setConnections(nextConnections)
         setMeetings(nextMeetings)
         setInvitations(nextInvitations)
-      })
-      .catch((reason: Error) => setError(reason.message))
+        setStatus('ready')
+      } catch (reason) {
+        if (!active) return
+        setError(reason instanceof Error ? reason.message : 'Could not load booking controls')
+        setStatus('failed')
+      }
+    }
+    void load()
+    return () => { active = false }
   }, [])
 
   return <ThemeProvider theme={themeByID('nerdswhofish')}>
@@ -35,7 +52,9 @@ export default function Admin() {
       </header>
       <div className="admin-title"><p className="kicker">Booking controls</p><h1>Keep the calendars tidy.</h1><p>{session ? `Signed in as ${session.email}` : 'Connect an allowed Google account to manage this deployment.'}</p></div>
       {error && <div className="error" role="alert">{error}</div>}
-      {!session ? <a className="primary-button admin-signin" href="/api/admin/google/start">Continue with Google <ExternalLink size={17} /></a> : <div className="admin-grid">
+      {status === 'loading' && <p role="status">Loading booking controls...</p>}
+      {status === 'signed-out' && <a className="primary-button admin-signin" href="/api/admin/google/start">Continue with Google <ExternalLink size={17} /></a>}
+      {status === 'ready' && <div className="admin-grid">
         <div className="admin-stack">
           <section className="admin-section">
             <div className="admin-section-heading"><div><p className="kicker">Google Calendar</p><h2>Busy calendars</h2></div><a className="icon-link" href="/api/admin/google/start"><Plus size={17} /> Add my account</a></div>
