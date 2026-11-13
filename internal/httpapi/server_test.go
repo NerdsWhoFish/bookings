@@ -18,6 +18,28 @@ import (
 	"github.com/NerdsWhoFish/bookings/internal/store"
 )
 
+func TestSecurityHeadersAllowLocalCollectorDuringMigration(t *testing.T) {
+	handler := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("wrapped handler status = %d", response.Code)
+	}
+	directives := strings.Split(response.Header().Get("Content-Security-Policy"), "; ")
+	var connect string
+	for _, directive := range directives {
+		if strings.HasPrefix(directive, "connect-src ") {
+			connect = directive
+		}
+	}
+	const expected = "connect-src 'self' https://rum.stout.zone https://*.grafana.net https://*.grafana.com"
+	if connect != expected {
+		t.Fatalf("unexpected collector policy: %s", connect)
+	}
+}
+
 func TestAvailabilityReturnsJSONArrayWhenNoSlotsExist(t *testing.T) {
 	meeting := domain.MeetingType{
 		ID:                  "empty",
