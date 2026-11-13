@@ -148,15 +148,20 @@ function ConnectionEditor({ connection, onSaved, onError }: { connection: Calend
 function MeetingEditor({ meeting, connections, onSaved, onDeleted, onError }: { meeting: MeetingType; connections: CalendarConnection[]; onSaved: (value: MeetingType) => void; onDeleted: (id: string) => void; onError: (message: string) => void }) {
   const [draft, setDraft] = useState({ ...meeting, attendeeEmails: meeting.attendeeEmails ?? [], blockerEmails: meeting.blockerEmails ?? [] })
   const [open, setOpen] = useState(meeting.name === 'New meeting type')
-  const [calendars, setCalendars] = useState<CalendarInfo[]>([])
+  const [calendarResult, setCalendarResult] = useState<{ connectionId: string; calendars: CalendarInfo[] }>({ connectionId: '', calendars: [] })
+  const calendars = calendarResult.connectionId === draft.destinationConnectionId ? calendarResult.calendars : []
   const [persisted, setPersisted] = useState(meeting.name !== 'New meeting type')
   const [confirmDelete, setConfirmDelete] = useState(false)
   useEffect(() => {
-    if (!draft.destinationConnectionId) {
-      setCalendars([])
-      return
-    }
-    api.calendars(draft.destinationConnectionId).then(setCalendars).catch((reason: Error) => onError(reason.message))
+    const connectionId = draft.destinationConnectionId
+    if (!connectionId) return
+    let active = true
+    api.calendars(connectionId).then((next) => {
+      if (active) setCalendarResult({ connectionId, calendars: next })
+    }).catch((reason: Error) => {
+      if (active) onError(reason.message)
+    })
+    return () => { active = false }
   }, [draft.destinationConnectionId, onError])
   const save = async () => {
     try {

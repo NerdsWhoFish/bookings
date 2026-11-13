@@ -6,12 +6,9 @@ import '@fontsource/ibm-plex-sans/latin-400.css'
 import '@fontsource/ibm-plex-sans/latin-500.css'
 import '@fontsource/ibm-plex-sans/latin-600.css'
 import './styles.css'
-import App from './App'
-import Admin from './Admin'
-import Connect from './Connect'
+import Root from './Root'
 import { captureError } from './telemetry-client'
 
-const Root = window.location.pathname.startsWith('/admin') ? Admin : window.location.pathname.startsWith('/connect') ? Connect : App
 createRoot(document.getElementById('root')!, {
   onCaughtError: (error) => captureError(error, 'render'),
   onUncaughtError: (error) => captureError(error, 'render'),

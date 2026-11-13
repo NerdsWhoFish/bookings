@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Admin from './Admin'
 
@@ -9,6 +9,24 @@ afterEach(() => {
 })
 
 describe('admin startup', () => {
+  it('clears destination calendars when switching back to the development mock', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/admin/session') return Promise.resolve(Response.json({ email: 'admin@example.com', expiresAt: 2000000000 }))
+      if (input === '/api/admin/connections') return Promise.resolve(Response.json([{ id: 'connection', email: 'calendar@example.com', busyCalendarIds: [] }]))
+      if (input === '/api/admin/connections/connection/calendars') return Promise.resolve(Response.json([{ id: 'calendar', name: 'Test calendar', primary: false }]))
+      return Promise.resolve(Response.json([]))
+    }))
+    render(<Admin />)
+    fireEvent.click(await screen.findByRole('button', { name: /New type/ }))
+    const account = screen.getByLabelText('Destination account')
+    const calendar = screen.getByLabelText('Destination calendar')
+    fireEvent.change(account, { target: { value: 'connection' } })
+    expect(await within(calendar).findByRole('option', { name: 'Test calendar' })).toBeInTheDocument()
+    fireEvent.change(account, { target: { value: '' } })
+    expect(calendar).toBeDisabled()
+    expect(within(calendar).queryByRole('option', { name: 'Test calendar' })).not.toBeInTheDocument()
+  })
+
   it('checks the session before requesting protected data and shows sign-in for a 401', async () => {
     let resolveSession!: (response: Response) => void
     const pendingSession = new Promise<Response>((resolve) => { resolveSession = resolve })
