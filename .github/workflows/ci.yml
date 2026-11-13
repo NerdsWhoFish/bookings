@@ -65,6 +65,11 @@ jobs:
       - run: tofu fmt -check -recursive infra
       - run: tofu -chdir=infra/examples/basic init -backend=false
       - run: tofu -chdir=infra/examples/basic validate
+      - name: Test environment secret references
+        run: |
+          tofu -chdir=infra/modules/environment init -backend=false
+          tofu -chdir=infra/modules/environment validate
+          tofu -chdir=infra/modules/environment test
 
   container:
     runs-on: ubuntu-latest

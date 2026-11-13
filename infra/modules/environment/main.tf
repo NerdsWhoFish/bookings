@@ -302,8 +302,8 @@ resource "google_cloud_run_v2_service" "bookings" {
           name = "OTEL_EXPORTER_OTLP_HEADERS"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.runtime["otel_exporter_headers"].secret_id
-              version = "latest"
+              secret  = local.otel_header_references.runtime.secret_id
+              version = local.otel_header_references.runtime.version
             }
           }
         }
@@ -314,6 +314,7 @@ resource "google_cloud_run_v2_service" "bookings" {
   depends_on = [
     google_project_service.required,
     google_secret_manager_secret_iam_member.runtime,
+    google_secret_manager_secret_iam_member.external_otel_headers,
   ]
 }
 
