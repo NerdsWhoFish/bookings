@@ -875,7 +875,7 @@ func sameOrigin(request *http.Request, publicURL string) bool {
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://*.grafana.net https://*.grafana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://rum.stout.zone https://*.grafana.net https://*.grafana.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		response.Header().Set("Referrer-Policy", "same-origin")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")

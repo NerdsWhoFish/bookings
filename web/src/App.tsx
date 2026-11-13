@@ -128,11 +128,8 @@ function TimePicker({ meeting, slots, loading, onBack, onLoadRange, onChoose }: 
   const [rangeStart, setRangeStart] = useState(bookingWindowStart)
   const days = useMemo(() => groupSlotsByDay(slots, displayTimeZone), [displayTimeZone, slots])
   const [day, setDay] = useState('')
-  useEffect(() => {
-    if (days.length && !days.some(([key]) => key === day)) setDay(days[0][0])
-    if (!days.length && day) setDay('')
-  }, [day, days])
-  const visible = days.find(([key]) => key === day)?.[1] ?? []
+  const selectedDay = days.some(([key]) => key === day) ? day : days[0]?.[0] ?? ''
+  const visible = days.find(([key]) => key === selectedDay)?.[1] ?? []
   const canLoadEarlier = rangeStart.getTime() > bookingWindowStart.getTime()
   const canLoadLater = hasLaterAvailability(rangeStart, bookingWindowStart, meeting.bookingWindowDays)
   const bookingWindowEnd = addDays(bookingWindowStart, meeting.bookingWindowDays)
@@ -157,7 +154,7 @@ function TimePicker({ meeting, slots, loading, onBack, onLoadRange, onChoose }: 
       </div>
       {days.length === 0 ? <div className="empty"><CalendarDays /><h3>No open water in this range.</h3><p>{canLoadLater ? 'Try later dates or pick another meeting type.' : 'Try another meeting type.'}</p></div> : <>
         <div className="day-strip" role="tablist" aria-label="Available days">
-          {days.map(([key, values]) => <button role="tab" aria-selected={key === day} key={key} onClick={() => setDay(key)}>
+          {days.map(([key, values]) => <button role="tab" aria-selected={key === selectedDay} key={key} onClick={() => setDay(key)}>
             <span>{formatInTimeZone(values[0].start, displayTimeZone, { weekday: 'short' })}</span>
             <strong>{formatInTimeZone(values[0].start, displayTimeZone, { day: 'numeric' })}</strong>
             <small>{formatInTimeZone(values[0].start, displayTimeZone, { month: 'short' })}</small>
