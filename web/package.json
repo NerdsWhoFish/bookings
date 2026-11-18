@@ -15,7 +15,7 @@
     "@grafana/faro-web-sdk": "^2.11.0",
     "@grafana/faro-web-tracing": "^2.11.0",
     "@nerdswhofish/browser-telemetry": "https://github.com/NerdsWhoFish/dusk/releases/download/v1.21.0/nerdswhofish-browser-telemetry-0.1.0.tgz",
-    "lucide-react": "^1.39.0",
+    "lucide-react": "^1.73.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
